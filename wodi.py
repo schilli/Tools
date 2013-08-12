@@ -9,11 +9,11 @@
 # across the given number of free cores
 #
 # Usage:
-#   wodi2.py -h | --help for usage information
+#   wodi.py -h | --help for usage information
 #
 # supply file names and such in the Settings class
 
-from wodi2 import *
+from wodi import *
 import sys, argparse, os, shutil, time
 
 if __name__ == "__main__":
