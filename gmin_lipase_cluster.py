@@ -13,6 +13,8 @@ from gmin_lipase_cluster import *
 import sys, os, time, math
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib as mpl
+import cPickle as pickle
 
 if __name__ == "__main__":
     main()  
@@ -23,13 +25,19 @@ if __name__ == "__main__":
 
 def main():
 
+    pickleFile = 'gmin_lipase_cluster.pickle'
+
+    what = None
+    if len(sys.argv) > 2:
+        what = ' '.join(sys.argv[2:])
+
     directories = read_dirnames()
 
     # read structures
     print "Reading structures ...", 
     sys.stdout.flush()
     starttime = time.time()
-    structures = read_all_structures(directories)
+    structures = read_all_structures(directories, pickleFile)
     runtime = time.time() - starttime
     print "{} structures read in {:.2f} seconds".format(len(structures), runtime)
 
@@ -42,7 +50,7 @@ def main():
     runtime = time.time() - starttime
     print "{:.2f} seconds".format(runtime)
 
-    plot_CitA_collective_coordinates(structures)
+    plot_CitA_collective_coordinates(structures, what)
 
 #    for structure in structures[:4]:
 #        print structure
@@ -139,8 +147,35 @@ def read_structures(directory):
 # ============================================================================ #
 
 
-def read_all_structures(directories):
+def read_all_structures(directories, pickleFileName):
     """Given a list of directories, read all GMIN structures"""
+
+    # if file with pickled data exists
+    if os.path.isfile(pickleFileName):
+
+        # read pickled data
+        pickleFile = open(pickleFileName, 'r')
+        (pickledDirectories, structures) = pickle.load(pickleFile)
+        pickleFile.close()
+
+        # check if list of directories is the same
+        sameDirectories = True
+        for directory in directories:
+            if directory not in pickledDirectories:
+                sameDirectories = False
+        for directory in pickledDirectories:
+            if directory not in directories:
+                sameDirectories = False
+
+        # if paths to structures are the same,
+        # return them
+        if sameDirectories:
+            print 'Read structures from pickled File'
+            return structures
+
+
+    # if paths to structures are not the same,
+    # read them in from respective files
 
     structures = []
 
@@ -148,12 +183,17 @@ def read_all_structures(directories):
 
         structures += read_structures(directory)
 
+    # pickle structures
+    pickleFile = open(pickleFileName, 'w')
+    pickle.dump((directories, structures), pickleFile)
+    pickleFile.close() 
+
     return structures
 
 
 # ============================================================================ #
 
-def plot_CitA_collective_coordinates(structures):
+def plot_CitA_collective_coordinates(structures, what=None):
     """The function name says it"""
 
     # Compile coordinates into array
@@ -168,15 +208,36 @@ def plot_CitA_collective_coordinates(structures):
     for i, structure in enumerate(structures):
         energy    [i] = structure.energy
         CitA_r    [i] = structure.CitA_r    
-        CitA_theta[i] = structure.CitA_theta
-        CitA_phi  [i] = structure.CitA_phi  
+        CitA_theta[i] = structure.CitA_theta / math.pi * 180.0
+        CitA_phi  [i] = structure.CitA_phi   / math.pi * 180.0
         Lip_r     [i] = structure.Lip_r     
-        Lip_theta [i] = structure.Lip_theta 
-        Lip_phi   [i] = structure.Lip_phi   
+        Lip_theta [i] = structure.Lip_theta  / math.pi * 180.0
+        Lip_phi   [i] = structure.Lip_phi    / math.pi * 180.0
 
     # scale energies to 0-1 range for coloring
+    # (1 = high energy / bad, 0 = low energy / good
+    energy_colors = (energy - min(energy)) / max(energy - min(energy))
+    #energy_colors = [ str(i) for i in energy_colors ]
+
     # (0 = high energy / bad, 1 = low energy / good
-    energy_colors = -1*(((energy - min(energy)) / max(energy - min(energy))) - 1)
+    energy_colors_invert = -1*(((energy - min(energy)) / max(energy - min(energy))) - 1) 
+
+    # some plot parameters
+    alpha       = 0.5
+    energyScale = 'energy (kcal/mol)'
+    lengthUnit  = 'Angstrom'
+    angleUnit   = 'Degree'
+    markerSize  = 200
+    colorMap    = plt.cm.cool
+
+    energySpan   = max(energy) - min(energy)
+    energyMargin = 0.1
+    energyRange  = [min(energy)-energyMargin*energySpan, max(energy)+energyMargin*energySpan]
+    #phiRange     = [-180.0, 180.0]
+    phiRange     = [100.0, 130.0]
+    #thetaRange   = [0.0, 180.0]
+    thetaRange   = [30.0, 70.0]
+    rRange       = [24.0, 38.0]
 
     # Create plot
     fig = plt.figure()
@@ -184,37 +245,113 @@ def plot_CitA_collective_coordinates(structures):
 
     # Plot data
 
-    what = 'CitA phi r'
+    if what is None:
+        what = 'CitA phi'
 
     if what == 'CitA phi':
-        ax.plot(CitA_phi, energy, 'o')
-        ax.set_xlabel('CitA phi (rad)')
-        ax.set_ylabel('energy (a.u.)') 
+        sc = ax.scatter(CitA_phi, energy, c=energy, s=markerSize, cmap=colorMap)
+        ax.set_xlabel('CitA phi (' + angleUnit + ')')
+        ax.set_ylabel(energyScale)   
+        plt.xlim(phiRange)
+        plt.ylim(energyRange)
+        sc.set_alpha(alpha)
+        cbar = plt.colorbar(sc)
+        cbar.set_label(energyScale)  
 
     elif what == 'CitA theta':
-        ax.plot(CitA_theta, energy, 'o')
-        ax.set_xlabel('CitA theta (rad)')
-        ax.set_ylabel('energy (a.u.)')  
+        sc = ax.scatter(CitA_theta, energy, c=energy, s=markerSize, cmap=colorMap)
+        ax.set_xlabel('CitA theta (' + angleUnit + ')')
+        ax.set_ylabel(energyScale)   
+        plt.xlim(thetaRange)
+        plt.ylim(energyRange)
+        sc.set_alpha(alpha)
+        cbar = plt.colorbar(sc)
+        cbar.set_label(energyScale)   
 
     elif what == 'CitA r':
-        ax.plot(CitA_r, energy, 'o')
-        ax.set_xlabel('CitA r (a.u.)')
-        ax.set_ylabel('energy (a.u.)')   
+        sc = ax.scatter(CitA_r, energy, c=energy, s=markerSize, cmap=colorMap)
+        ax.set_xlabel('CitA r (' + lengthUnit + ')')
+        ax.set_ylabel(energyScale)   
+        plt.xlim(rRange)
+        plt.ylim(energyRange)
+        sc.set_alpha(alpha)
+        cbar = plt.colorbar(sc)
+        cbar.set_label(energyScale) 
 
     elif what == 'CitA phi theta':
-        ax.plot(CitA_phi, CitA_theta, 'o')
-        ax.set_xlabel('CitA phi (a.u.)')
-        ax.set_ylabel('CitA theta (a.u.)')
+        sc = ax.scatter(CitA_phi, CitA_theta, c=energy, s=markerSize, cmap=colorMap)
+        ax.set_xlabel('CitA phi (' + angleUnit + ')')
+        ax.set_ylabel('CitA theta (' + angleUnit + ')')
+        plt.xlim(phiRange)
+        plt.ylim(thetaRange) 
+        sc.set_alpha(alpha)
+        cbar = plt.colorbar(sc)
+        cbar.set_label(energyScale)
 
     elif what == 'CitA phi r':
-        ax = fig.add_subplot(111, polar=True)
-        s  = plt.scatter(CitA_phi, CitA_theta, c=energy_colors, s=10+100*energy_colors, cmap=plt.cm.cool)
-        s.set_alpha(0.75)
-        plt.colorbar()
+#        ax = fig.add_subplot(111, polar=True)
+#        s  = plt.scatter(CitA_phi, CitA_theta, c=energy_colors, s=10+100*energy_colors, cmap=plt.cm.cool)
+#        s.set_alpha(alpha)
+#        plt.colorbar()
+
+        sc = ax.scatter(CitA_phi, CitA_r, c=energy, s=markerSize, cmap=colorMap)
+        ax.set_xlabel('CitA phi (' + angleUnit + ')')
+        ax.set_ylabel('CitA r (' + lengthUnit + ')')
+        plt.xlim(phiRange)
+        plt.ylim(rRange) 
+        sc.set_alpha(alpha)
+        cbar = plt.colorbar(sc)
+        cbar.set_label(energyScale) 
+
+    elif what == 'CitA theta r':
+        sc = ax.scatter(CitA_theta, CitA_r, c=energy, s=markerSize, cmap=colorMap)
+        ax.set_xlabel('CitA theta (' + angleUnit + ')')
+        ax.set_ylabel('CitA r (' + lengthUnit + ')')
+        plt.xlim(thetaRange)
+        plt.ylim(rRange) 
+        sc.set_alpha(alpha)
+        cbar = plt.colorbar(sc)
+        cbar.set_label(energyScale)  
+
+    # ============ #
+
+    elif what == 'Lip phi':
+        ax.plot(Lip_phi, energy, 'o')
+        ax.set_xlabel('Lip phi (rad)')
+        ax.set_ylabel(energyScale) 
+
+    elif what == 'Lip theta':
+        ax.plot(Lip_theta, energy, 'o')
+        ax.set_xlabel('Lip theta (rad)')
+        ax.set_ylabel(energyScale)  
+
+    elif what == 'Lip r':
+        ax.plot(Lip_r, energy, 'o')
+        ax.set_xlabel('Lip r (Angstrom)')
+        ax.set_ylabel(energyScale)    
+
+    # ============ #
+
+    elif what == 'ultimate':
+        edgecolors = []
+        for angle in Lip_theta:
+            angle = angle/180.0
+            edgecolors.append(colorMap(angle))
+
+        sc = ax.scatter(CitA_phi, CitA_theta, c=energy, s=200+Lip_phi, edgecolors=edgecolors, linewidths=2, cmap=colorMap)
+        ax.set_xlabel('CitA phi (' + angleUnit + ')')
+        ax.set_ylabel('CitA theta (' + angleUnit + ')')
+        plt.xlim(phiRange)
+        plt.ylim(thetaRange) 
+        sc.set_alpha(alpha)
+        cbar = plt.colorbar(sc)
+        cbar.set_label(energyScale)   
+
+    # ============ #
 
     else:
         print "Plot option not known: {}".format(what)
-        sys.exit(1)
+        sys.exit(1) 
 
     plt.show()
 
@@ -470,7 +607,6 @@ class Structure:
 #                                                      self.Lip_r,
 #                                                      self.Lip_theta/math.pi*180,
 #                                                      self.Lip_phi/math.pi*180) 
-        
         
 
 # ==================================== #
