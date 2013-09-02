@@ -1,16 +1,16 @@
 
-function mean_shift()
+function [P, n] = mean_shift(h)
 
 close all;
 
 % parameters
-nPoints = 2000;
+nPoints = 200;
 scale   = 1;
 SD      = 0.1;
 eps     = 0.001;
 maxIter = 1000000000;
 normEps = 1e-12;
-h       = SD;
+%h       = 0.1;
 
 % generate means
 a = 1/sqrt(2);
@@ -28,6 +28,22 @@ for i = 1:size(means,2)
 end
 
 
+% load points from file
+points = load('/home/oliver/SiSc/Courses/Thesis/iGRASP/liPASe/Complex/structure_analysis/coordinates.dat');
+
+%fig1 = figure();
+%plot(points(1,:), points(2,:), 'bo');
+
+means = mean(points, 2);
+stdev = std(points, 0, 2);
+points = bsxfun(@minus, points, means);
+points = bsxfun(@rdivide, points, stdev);
+
+
+%fig2 = figure();
+%plot(points(1,:), points(2,:), 'bo');
+
+
 endPoints = zeros(size(points));
 
 for i = 1:size(points,2)
@@ -42,7 +58,11 @@ for i = 1:size(points,2)
     iter = 0;
     oldNorm = 2*norm(M);
     
-    while norm(M) > eps && iter < maxIter && norm(M) ~= oldNorm && abs(norm(M) - oldNorm) > normEps
+    while norm(M) > eps && ...
+            iter < maxIter && ...
+            norm(M) ~= oldNorm && ...
+            abs(norm(M) - oldNorm) > normEps
+        
         iter = iter + 1;
         p = p + M;
         oldNorm = norm(M);
@@ -52,27 +72,29 @@ for i = 1:size(points,2)
         %fflush(stdout); 
     end
     
-    if iter >= maxIter
-        fprintf('Finished with iter reaching maxIter\n');
-    end
-    
-    if norm(M) == oldNorm
-        fprintf('Finished with norm(M) == oldNorm\n');
-    end
-    
-    if abs(norm(M) - oldNorm) <= normEps
-        fprintf('Finished with abs(norm(M) - oldNorm) <= normEps\n');
-    end
+%     if iter >= maxIter
+%         fprintf('Finished with iter reaching maxIter\n');
+%     end
+%     
+%     if norm(M) == oldNorm
+%         fprintf('Finished with norm(M) == oldNorm\n');
+%     end
+%     
+%     if abs(norm(M) - oldNorm) <= normEps
+%         fprintf('Finished with abs(norm(M) - oldNorm) <= normEps\n');
+%     end
 
     endPoints(:,i) = p;
 end
 
-P = find_convergence_points(endPoints, 1e-1)
+P = find_convergence_points(endPoints, 1e-3);
 
 % plot points
 plot(points(1,:), points(2,:), 'bo', 'LineWidth', 2);
 hold on;
 plot(endPoints(1,:), endPoints(2,:), 'r*', 'LineWidth', 2);
+
+n = size(P,2);
 
 end % mean_shift()
 

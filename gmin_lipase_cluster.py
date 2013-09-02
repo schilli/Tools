@@ -50,19 +50,32 @@ def main():
     runtime = time.time() - starttime
     print "{:.2f} seconds".format(runtime)
 
-    plot_CitA_collective_coordinates(structures, what)
+    # cluster
+    (structures, lowest) = mean_shift_clustering(structures)
+
+#    structures = lowest
 
 #    for structure in structures[:4]:
 #        print structure
 
-#    ranking = []
-#    for structure in structures:
-#        ranking.append([structure.energy, structure.filename])
-#
-#    ranking.sort()
-#
-#    for r in ranking:
-#        print "{:.2f}".format(r[0]), r[1]
+    ranking = []
+    for structure in structures:
+        ranking.append([structure.energy, structure.filename])
+
+    ranking.sort()
+
+    for r in ranking:
+        print "{:.2f}".format(r[0]), r[1][80:]
+
+
+    # print ranked structures filenames and paths to file
+    filename = 'ranked_structures'
+    outfile = open(filename, 'w')
+    for r in ranking:
+        outfile.write(r[1] + '.pdb\n')
+    outfile.close()
+
+    plot_CitA_collective_coordinates(structures, what)
 
        
 # ============================================================================ #
@@ -233,10 +246,10 @@ def plot_CitA_collective_coordinates(structures, what=None):
     energySpan   = max(energy) - min(energy)
     energyMargin = 0.1
     energyRange  = [min(energy)-energyMargin*energySpan, max(energy)+energyMargin*energySpan]
-    #phiRange     = [-180.0, 180.0]
-    phiRange     = [100.0, 130.0]
-    #thetaRange   = [0.0, 180.0]
-    thetaRange   = [30.0, 70.0]
+    phiRange     = [-180.0, 180.0]
+    #phiRange     = [100.0, 122.0]
+    thetaRange   = [0.0, 180.0]
+    #thetaRange   = [30.0, 75.0]
     rRange       = [24.0, 38.0]
 
     # Create plot
@@ -354,6 +367,201 @@ def plot_CitA_collective_coordinates(structures, what=None):
         sys.exit(1) 
 
     plt.show()
+
+# ============================================================================ #
+
+def mean_shift_clustering(structures):
+    """Cluster the structures using mean shift clustering"""
+
+#    structures = structures[:4]
+
+    # parameters
+    h = 0.2
+    eps = 1e-5
+
+    # Compile coordinates into array
+    coordinates = np.zeros([6, len(structures)], dtype=np.float)
+    for i, structure in enumerate(structures):
+        coordinates[0,i] = structure.energy
+        coordinates[1,i] = structure.CitA_r    
+        coordinates[2,i] = structure.CitA_theta
+        coordinates[3,i] = structure.CitA_phi  
+        coordinates[4,i] = structure.Lip_theta 
+        coordinates[5,i] = structure.Lip_phi   
+
+#    np.savetxt("coordinates.dat", coordinates)
+
+
+    (coordinates, stdev, means) = normalize_coordinates(coordinates)
+
+
+#    fig = plt.figure()
+#    ax  = fig.add_subplot(111) 
+#    ax.scatter(coordinates[0,:], coordinates[1,:])
+
+    endCoordinates = np.zeros_like(coordinates)
+
+    # loop through points
+    for i in range(coordinates.shape[1]):
+        p = coordinates[:,i]
+        M = m(p, coordinates, h);
+
+        # find fixpoint
+        oldNorm = 2*np.linalg.norm(M)
+        while abs(np.linalg.norm(M) - oldNorm) > eps:
+            p = p + M
+            oldNorm = np.linalg.norm(M)
+            M = m(p, coordinates, h)
+
+        endCoordinates[:,i] = p
+
+    
+    (clusterCoords, representatives, lowest) = find_fix_points(endCoordinates, coordinates, 1e-1)
+
+#    ax.scatter(clusterCoords[0,:], clusterCoords[1,:], c='r', marker='x')
+#    ax.scatter(clusterCoords[0,2], clusterCoords[1,2], c='g', marker='^')
+#    plt.show()
+
+    coordinates   = denormalize_coordinates(coordinates, stdev, means)
+    clusterCoords = denormalize_coordinates(clusterCoords, stdev, means)
+
+    # compile list of representative sturctures (nearest to cluster center)
+    repStructures = []
+    for r in representatives:
+        repStructures.append(structures[r])
+
+    # compile list of representative sturctures (lowest energy in cluster)
+    lowestStructures = []
+    for l in lowest:
+        lowestStructures.append(structures[l]) 
+
+    
+    return repStructures, lowestStructures
+
+# ============================================================================ #
+
+def m(x, points, h):
+    """Compute negative density gradient"""
+    A = np.zeros_like(x)
+    B = 0
+    for i in range(points.shape[1]):
+
+        p = points[:,i]
+        G = g(np.linalg.norm(x-p)**2 / h**2)
+
+        A += p * G
+        B +=     G
+
+    import warnings
+    warnings.filterwarnings('error')
+
+    try:
+        M = A/B - x
+    except RuntimeWarning:
+        M = -x
+
+    return M
+
+# ============================================================================ #
+
+def g(x):
+    """negative derivative of a gaussian"""
+    G =  -2 * x * math.exp(-1 * x**2)
+    return G
+
+# ============================================================================ #
+
+def normalize_coordinates(coordinates):
+    """Normalize coordinates such that each coordinate has
+    a stdev of 1 and mean 0.
+    Return also a vector of stdevs and means for backtransformation"""
+    
+#    stdev = np.mat(np.std( coordinates, 1)).T
+#    means = np.mat(np.mean(coordinates, 1)).T
+
+    stdev = np.std( coordinates, 1)
+    means = np.mean(coordinates, 1)
+
+    normCoordinates = np.copy(coordinates)
+    for col in range(normCoordinates.shape[1]):
+        normCoordinates[:,col] = (normCoordinates[:,col] - means) / stdev
+
+#    normCoordinates = coordinates - means
+#    normCoordinates = normCoordinates / stdev
+
+    return normCoordinates, stdev, means
+
+# ============================================================================ #
+
+def denormalize_coordinates(coordinates, stdev, means):
+    """Reverse transformation of normalize_coordinates()"""
+
+    coord = np.copy(coordinates)
+
+    for col in range(coord.shape[1]):
+        coord[:,col] = (coord[:,col] * stdev) + means
+    
+#    coord = coordinates / (1/stdev)
+#    coord = coord + means
+
+    return coord
+
+# ============================================================================ #
+
+def find_fix_points(points, originalP, eps):
+    """Return a list of unique points in array points
+    Two points are considered to be equal when their distance is
+    smaller than eps"""
+
+    cluster = -1 * np.ones(points.shape[1], dtype=np.int)
+    currentCluster = -1
+
+    # loop through all points
+    for i in range(points.shape[1]):
+        # if current point has not been assigned to a cluster yet
+        if cluster[i] == -1:
+            currentCluster += 1
+            cluster[i] = currentCluster
+            p = points[:,i]
+            # find all points belonging to his cluster
+            for j in range(i,points.shape[1]):
+                if cluster[j] == -1 and np.linalg.norm(p-points[:,j]) <= eps:
+                    cluster[j] = currentCluster
+
+    # collect cluster coordinates and indices of representative points
+    representatives = np.zeros(max(cluster)+1, dtype=np.int)
+    lowest          = np.zeros(max(cluster)+1, dtype=np.int)
+    distances       = (max(cluster)+1) * [float('Inf')]
+    clusterCoords   = np.zeros([points.shape[0], max(cluster)+1], dtype=np.float)
+
+    currentCluster = 0
+    # loop through points
+    for i in range(points.shape[1]):
+        lowestEnergy = float('Inf');
+
+        # only care about those belonging to the current cluster
+        if cluster[i] == currentCluster:
+            clusterCoords[:,currentCluster] = points[:,i]
+
+            for j in range(originalP.shape[1]):
+
+                if np.linalg.norm(clusterCoords[:,currentCluster] - originalP[:,j]) < distances[currentCluster]:
+                    representatives[currentCluster] = j
+                    distances[currentCluster] = np.linalg.norm(clusterCoords[:,currentCluster] - originalP[:,j])
+
+                if cluster[j] == currentCluster and originalP[0,j] < lowestEnergy:
+                    lowestEnergy = originalP[0,j]
+                    lowest[currentCluster] = j
+
+            currentCluster += 1
+
+
+#    print representatives
+#    print distances
+#    
+#    print 'Clusters found: ', max(cluster)+1
+
+    return clusterCoords, representatives, lowest
 
 # ============================================================================ #
 
