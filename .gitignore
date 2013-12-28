@@ -1,8 +1,6 @@
 # Python
 *.py[cod]
 
-# Temporary and swap files
-*.swp
 
 # C extensions
 *.so
