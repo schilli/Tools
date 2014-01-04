@@ -1,4 +1,5 @@
 #!/usr/bin/perl -w
+# ToDo: Retrieve raw info
 
 $VERSION = 0.1;
 
@@ -36,6 +37,7 @@ The following options are recognized:
     -m, --mpd               Switch to start a new mpd ring on the requested hosts
                             Any ring already running will be destroyed
     -j, --interactive       Switch to specify jubio nodes to run on interactively
+    -l, --loglevel 2        Set loglevel (1 = only warnings, 2 = everything)
 
 
 node names are specified with either alias or hostname indices:
@@ -67,6 +69,10 @@ $jubioOffset = 36;
 @defaultHostnames = (1..32);
 foreach $n (@defaultHostnames) { $n = &hostname_from_index($n); }
 
+# Loglevels
+#$warnings   = 1;
+$everything = 2;
+
 # ============================================================================ #
 
 # ==== #
@@ -74,15 +80,24 @@ foreach $n (@defaultHostnames) { $n = &hostname_from_index($n); }
 # ==== # 
 
 # Global variables
-@excludeNodes = (); # nodes not to query
-@includeNodes = (); # nodes to query
+@excludeNodes = ();    # nodes not to query
+@includeNodes = ();    # nodes to query
+$qthreads     = 0;     # threads to use for node load query
+$loglevel     = 1;
+
+share(%rawInfo);       # raw information about jubio nodes
 
 &parse_command_line();
 
-#print &hostname_from_index(13), "\n";
-#print &hostname_from_index("c49"), "\n";
-#print &hostname_to_alias("iff560c49"), "\n";
-#print &alias_to_hostname("jubio13")  , "\n";
+if ($loglevel >= $everything) {
+    print "exclude:  @excludeNodes\n";
+    print "include:  @includeNodes\n";
+    print "qthreads: $qthreads\n";
+}
+
+&gather_jubio_info(); 
+
+foreach $key (keys(%rawInfo)) {print $key, " - ", $rawInfo{$key}, "\n";}
 
 # ============================================================================ #
 
@@ -97,19 +112,37 @@ sub parse_command_line {
 
     my $printhelp = 0;
 
-    GetOptions('h|help' => \$printhelp,
+    GetOptions('h|help'   => \$printhelp,
+        'i|include=s{1,}' => \@includeNodes,
         'e|exclude=s{1,}' => \@excludeNodes,
-        'i|include=s{1,}' => \@includeNodes);
+        'q|qthreads=i'    => \$qthreads,
+        'l|loglevel=i'    => \$loglevel);
 
-    # print help and exit if required
+    # print help and exit if help option was given
     if ($printhelp) {
         print $USAGE;
         exit 0;
     }
 
     # parse included nodes
+    if (@includeNodes > 0) {
         # transform hostname or alias index into appropriate hostname
+        foreach $node (@includeNodes) { $node = &hostname_from_index($node); }
+    } else {
         # if list is empty, put all standard nodes here
+        @includeNodes = @defaultHostnames;
+    }
+
+    # parse excluded nodes
+    if (@excludeNodes > 0) {
+        # transform hostname or alias index into appropriate hostname
+        foreach $node (@excludeNodes) { $node = &hostname_from_index($node); }
+
+        # remove every excluded node from the include array
+        foreach $node (@excludeNodes) {
+            @includeNodes = grep(!/$node/, @includeNodes);
+        }
+    }
 }
 
 # ============================================================================ #
@@ -164,44 +197,59 @@ sub hostname_from_index {
 
 # ============================================================================ #
 
-sub get_hostname_from_alias {
-    my $alias = $_[0];
+# gather jubio load information
+sub gather_jubio_info {
+    my $node = 0;
+    my $thread = 0;
+    if ($qthreads == 0) {$qthreads = @includeNodes;}
 
-    @data = `ssh $alias "hostname; hostname -a"`;
+    while ($node < @includeNodes) {
+        $thread = 0;
 
-    print $data[0];
-    print $data[1];
+        # create threads
+        while ($thread < $qthreads and $node < @includeNodes) {
+            $threads[$thread] = threads->create('gather_node_info', $includeNodes[$node]);
+            $thread++;
+            $node++;
+        }
+
+        # join with threads
+        $threadsCreated = $thread;
+        for ($thread = 0; $thread < $threadsCreated; $thread++) {
+            my $hostname =  $includeNodes[$node - $threadsCreated + $thread];
+            #@{$rawInfo{$hostname}} = $threads[$thread]->join();
+            $threads[$thread]->join();
+        } 
+    }
+}
+ 
+# ============================================================================ #
+
+# gather information of one specific jubio node
+sub gather_node_info {
+    my ($node) = @_;
+
+#    my $hostname = `ssh $node hostname 2>&1`;
+#    chomp($hostname);
+
+    my @info = `ssh $node "hostname; uname" 2>&1`;
+    chomp(@info);
+#    print "@info";
+
+    # put info in global array
+#    $rawInfo{$node} = $hostname;
+#    push (@{$rawInfo{$node}}, \@info);
+
+#    my $ID = threads->tid();
+#    print "Thread $ID processing node $hostname\n";
+
+    return @info;
 }
 
 # ============================================================================ #
 
-#$workmax  = 1000;
-#$nthreads = 2;
-#
-#for ($i = 0; $i < $nthreads; $i++) {
-#    $threads[$i] = threads->create('work');
-#}
-#
-#for ($i = 0; $i < $nthreads; $i++) {
-#    $thrReturn[$i] = $threads[$i]->join();
-#    print "Thread $i returned with $thrReturn[$i]\n";
-#}
-#
-#
-#sub hello {
-#    $ID = threads->tid();
-#    print "Hello World from thread $ID!\n";
-#}
-#
-#sub work {
-#    my $i;
-#    my $j;
-#    for ($i = 0; $i < $workmax; $i++) {
-#        for ($j = 0; $j < $workmax; $j++) {
-#        }
-#    }
-#    return $i * $j;
-#}
-
-
-
+sub hello {
+    my $ID = threads->tid();
+    print "Hello World from thread $ID!\n";
+    return $ID;
+}
