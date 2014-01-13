@@ -9,8 +9,10 @@
 from complex_traj_collective_coords import *
 import sys, os, time, math
 import numpy as np
+from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.pyplot as plt
 import cPickle as pickle
+import running_average as ra
 
 if __name__ == "__main__":
     main()  
@@ -26,14 +28,14 @@ def main():
 #                 "/home/oliver/SiSc/Courses/Thesis/iGRASP/liPASe/jubiofs/iGRASP/Complex/folded/citrate_bound/structure4/prod01.pdb",
 #                 "/home/oliver/SiSc/Courses/Thesis/iGRASP/liPASe/jubiofs/iGRASP/Complex/folded/citrate_bound/structure6/prod01.pdb"]
 
-    filenames = ["/home/oliver/BigData/citrate_bound/structure1/prod01.pdb",
-                 "/home/oliver/BigData/citrate_bound/structure2/prod01.pdb",
-                 "/home/oliver/BigData/citrate_bound/structure4/prod01.pdb",
-                 "/home/oliver/BigData/citrate_bound/structure6/prod01.pdb",
-                 "/home/oliver/BigData/citrate_free/structure1/prod01.pdb",
-                 "/home/oliver/BigData/citrate_free/structure2/prod01.pdb",
-                 "/home/oliver/BigData/citrate_free/structure4/prod01.pdb",
-                 "/home/oliver/BigData/citrate_free/structure6/prod01.pdb"] 
+    filenames = ["/home/oliver/BigData/ThinkPad/citrate_bound/structure1/prod01.pdb",
+                 "/home/oliver/BigData/ThinkPad/citrate_bound/structure2/prod01.pdb",
+                 "/home/oliver/BigData/ThinkPad/citrate_bound/structure4/prod01.pdb",
+                 "/home/oliver/BigData/ThinkPad/citrate_bound/structure6/prod01.pdb",
+                 "/home/oliver/BigData/ThinkPad/citrate_free/structure1/prod01.pdb",
+                 "/home/oliver/BigData/ThinkPad/citrate_free/structure2/prod01.pdb",
+                 "/home/oliver/BigData/ThinkPad/citrate_free/structure4/prod01.pdb",
+                 "/home/oliver/BigData/ThinkPad/citrate_free/structure6/prod01.pdb"] 
 
 #    filenames = ["/home/oliver/BigData/prod01.pdb"]
 
@@ -45,16 +47,21 @@ def main():
         pickleFile = open(pickleFileName, 'r')
         MDs = pickle.load(pickleFile)
         pickleFile.close() 
-        print "Read MDs from pickled file in {:.2f} sec.".format(time.time()-start)
+        print "Read MDs with {} frames from pickled file in {:.2f} sec.".format(len(MDs[0].CitA_r), time.time()-start)
 
     else:
 
         MDs = []
         for filename in filenames:
-
             start = time.time()
             MDs.append(Trajectory(filename))
             MDs[-1].get_collective_coordinates()
+            MDs[-1].sm_CitA_r     = 180.0/math.pi*ra.running_average(MDs[-1].CitA_r    , int(0.02*len(MDs[-1].CitA_r)),     'gaussian')
+            MDs[-1].sm_CitA_theta = 180.0/math.pi*ra.running_average(MDs[-1].CitA_theta, int(0.02*len(MDs[-1].CitA_theta)), 'gaussian')
+            MDs[-1].sm_CitA_phi   = 180.0/math.pi*ra.running_average(MDs[-1].CitA_phi  , int(0.02*len(MDs[-1].CitA_phi)),   'gaussian')
+            MDs[-1].sm_Lip_r      = 180.0/math.pi*ra.running_average(MDs[-1].CitA_r    , int(0.02*len(MDs[-1].CitA_r)),     'gaussian')
+            MDs[-1].sm_Lip_theta  = 180.0/math.pi*ra.running_average(MDs[-1].CitA_theta, int(0.02*len(MDs[-1].CitA_theta)), 'gaussian')
+            MDs[-1].sm_Lip_phi    = 180.0/math.pi*ra.running_average(MDs[-1].CitA_phi  , int(0.02*len(MDs[-1].CitA_phi)),   'gaussian')
             MDs[-1].frames = []
             print "Done with file {}\n in {:.2f} sec.".format(filename, time.time()-start)
 
@@ -71,14 +78,104 @@ def main():
             print "{:.2f}, ".format(n),
         print "{:.2f}]".format(MDs[i].CitA_theta[a])
 
-    i = 0
-    plt.plot(MDs[i  ].CitA_theta, MDs[i  ].CitA_phi, 'r')
-    plt.plot(MDs[i+4].CitA_theta, MDs[i+4].CitA_phi, 'b')
-    plt.show()
+#    i = 0
+#    plt.plot(MDs[i  ].CitA_theta, MDs[i  ].CitA_phi, 'r')
+#    plt.plot(MDs[i+4].CitA_theta, MDs[i+4].CitA_phi, 'b')
+
+    markerSize = 2;
+
+    plot = '2d'
+
+    if plot == '3d':
+
+        fig = plt.figure()
+        ax  = fig.add_subplot(111, projection='3d') 
+        for i in range(4):
+
+            ax.plot([0], [0], [0], 'o')
+
+            x = []; y = []; z = [];
+            for n in range(len(MDs[i].CitA_phi)):
+    #            x.append(MDs[i].CitA_r[n] * math.sin(MDs[i].CitA_theta[n]) * math.cos(MDs[i].CitA_phi[n]) )
+    #            y.append(MDs[i].CitA_r[n] * math.sin(MDs[i].CitA_theta[n]) * math.sin(MDs[i].CitA_phi[n]) )
+    #            z.append(MDs[i].CitA_r[n] * math.cos(MDs[i].CitA_theta[n]) )  
+                x.append(MDs[i].r[n][0])
+                y.append(MDs[i].r[n][1])
+                z.append(MDs[i].r[n][2])
+            ax.plot3D(x, y, z, '-')
+
+            i = i + 4
+            x = []; y = []; z = [];
+            for n in range(len(MDs[i].CitA_phi)):
+    #            x.append(MDs[i].CitA_r[n] * math.sin(MDs[i].CitA_theta[n]) * math.cos(MDs[i].CitA_phi[n]) )
+    #            y.append(MDs[i].CitA_r[n] * math.sin(MDs[i].CitA_theta[n]) * math.sin(MDs[i].CitA_phi[n]) )
+    #            z.append(MDs[i].CitA_r[n] * math.cos(MDs[i].CitA_theta[n]) )  
+                x.append(MDs[i].r[n][0])
+                y.append(MDs[i].r[n][1])
+                z.append(MDs[i].r[n][2]) 
+            ax.plot3D(x, y, z, '-')
+
+            xmax = max(abs(max(x)), abs(min(x)))
+            ymax = max(abs(max(y)), abs(min(y)))
+            zmax = max(abs(max(z)), abs(min(z)))
+            totalMax = max([xmax, ymax, zmax])
+        
+            ax.set_xlim3d([-totalMax, totalMax])
+            ax.set_ylim3d([-totalMax, totalMax])
+            ax.set_zlim3d([-totalMax, totalMax]) 
 
 
+            plt.savefig('structure_{}_and_{}.png'.format(i-4, i), bbox_inches='tight')
 
 
+        plt.show()
+
+           
+    elif plot == '2d':
+
+        max_theta = -1*float('inf')
+        min_theta =    float('inf')
+        max_phi   = -1*float('inf')
+        min_phi   =    float('inf') 
+        for i in range(8):
+            theta = max(MDs[i].sm_CitA_theta)
+            phi   = max(MDs[i].sm_CitA_phi)
+            if theta > max_theta:
+                max_theta = theta
+            if phi   > max_phi:
+                max_phi   = phi
+            theta = min(MDs[i].sm_CitA_theta)
+            phi   = min(MDs[i].sm_CitA_phi)
+            if theta < min_theta:
+                min_theta = theta
+            if phi   < min_phi:
+                min_phi   = phi 
+
+            theta_diff = max_theta - min_theta
+            phi_diff   = max_phi   - min_phi
+
+
+        for i in range(4):
+            plt.figure()
+            plt.plot(MDs[i  ].sm_CitA_theta, MDs[i  ].sm_CitA_phi, 'r', lw=1)
+            plt.plot(MDs[i+4].sm_CitA_theta, MDs[i+4].sm_CitA_phi, 'b', lw=1)
+
+            plt.plot(MDs[i  ].sm_CitA_theta[0], MDs[i  ].sm_CitA_phi[0], '^r', ms=15)
+            plt.plot(MDs[i+4].sm_CitA_theta[0], MDs[i+4].sm_CitA_phi[0], '^b', ms=15)
+
+            plt.title('structure {}'.format(i+1))
+            plt.xlabel('theta (degree)')
+            plt.ylabel('phi (degree)')
+#            plt.xlim([0, math.pi])
+#            plt.ylim([-math.pi, math.pi])
+            plt.xlim([-0.1*theta_diff+min_theta, 0.1*theta_diff+max_theta])
+            plt.ylim([-0.1*phi_diff  +min_phi,   0.1*phi_diff  +max_phi])
+            plt.legend(['citrate bound', 'citrate free'], loc='lower left')
+
+            plt.savefig('collecitve_coords_structure{}.png'.format(i+1), bbox_inches='tight')
+            plt.savefig('collecitve_coords_structure{}.pdf'.format(i+1), bbox_inches='tight')
+
+        plt.show()
 
 # ============================================================================ #
 
@@ -96,12 +193,21 @@ class Trajectory:
         self.frames    = []
 
         # collective coordinates
+        self.r          = []
         self.CitA_r     = []
         self.CitA_theta = []
         self.CitA_phi   = []
         self.Lip_r      = []
         self.Lip_theta  = []
         self.Lip_phi    = []
+
+        self.sm_r          = [] 
+        self.sm_CitA_r     = [] 
+        self.sm_CitA_theta = [] 
+        self.sm_CitA_phi   = [] 
+        self.sm_Lip_r      = [] 
+        self.sm_Lip_theta  = [] 
+        self.sm_Lip_phi    = [] 
 
         if (filename != None):
             self.read_trajectory()
@@ -110,13 +216,25 @@ class Trajectory:
 
     def plot_collective_coordinates(self):
 
-        plt.plot(self.CitA_theta, self.CitA_phi)
+        x = []; y = []; z = [];
+        for i in range(len(self.CitA_phi)):
+            x.append( self.CitA_r[i] * math.sin(self.CitA_theta[i]/180.0*math.pi) * math.cos(self.CitA_phi[i]/180.0*math.pi) )
+            y.append( self.CitA_r[i] * math.sin(self.CitA_theta[i]/180.0*math.pi) * math.sin(self.CitA_phi[i]/180.0*math.pi) )
+            z.append( self.CitA_r[i] * math.cos(self.CitA_theta[i]/180.0*math.pi) ) 
+
+#        plt.plot(self.CitA_theta, self.CitA_phi)
+        plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+
+        sc = ax.scatter(x, y, z, c='b', s=markerSize, cmap=colorMap)
+        ax.scatter
 
 # ==================================== #
 
     def get_collective_coordinates(self):
 
         for frame in self.frames:
+            self.r         .append(frame.r         )
             self.CitA_r    .append(frame.CitA_r    )
             self.CitA_theta.append(frame.CitA_theta)
             self.CitA_phi  .append(frame.CitA_phi  )
@@ -191,6 +309,7 @@ class Structure:
         self.Lip_R  = np.eye(3)
 
         # Collective coordinates
+        self.r          = 0.0    # vector from CitA COM to Lip COM
         self.CitA_r     = 0.0
         self.CitA_theta = 0.0
         self.CitA_phi   = 0.0
@@ -462,6 +581,7 @@ class Structure:
         # Transform Lipase COM to CitA local coordinate system
         LipCOMlocal = LipCOM - CitACOM
         LipCOMlocal = np.inner(R, LipCOMlocal)
+        self.r = LipCOMlocal
         
 
         # Compute sperical coordinates of Lipase COM in CitA local coordinate system

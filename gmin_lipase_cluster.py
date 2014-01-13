@@ -12,6 +12,7 @@
 from gmin_lipase_cluster import *
 import sys, os, time, math
 import numpy as np
+from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 import cPickle as pickle
@@ -50,32 +51,62 @@ def main():
     runtime = time.time() - starttime
     print "{:.2f} seconds".format(runtime)
 
+    unclustered = structures
+
     # cluster
     (structures, lowest) = mean_shift_clustering(structures)
 
-#    structures = lowest
+    structures = lowest
 
 #    for structure in structures[:4]:
 #        print structure
 
     ranking = []
     for structure in structures:
-        ranking.append([structure.energy, structure.filename])
+        ranking.append([structure.energy, structure.filename, structure])
 
     ranking.sort()
 
+    print "\nRanked Structures [energy (kcal/mol), filename]"
+    rankedStructures = []
     for r in ranking:
         print "{:.2f}".format(r[0]), r[1][80:]
+        rankedStructures.append(r[2])
+    print ""
 
 
     # print ranked structures filenames and paths to file
     filename = 'ranked_structures'
     outfile = open(filename, 'w')
     for r in ranking:
-        outfile.write(r[1] + '.pdb\n')
+        outfile.write("{:.2f}, {}.pdb\n".format(r[0], r[1]))
     outfile.close()
 
-    plot_CitA_collective_coordinates(structures, what)
+
+    # print details about ranked structures to file
+    filename = 'ranked_structures_details'
+    outfile = open(filename, 'w')
+    outfile.write("#Energy (kcal/mol), CitA_r (A), CitA_theta (rad), CitA_phi (rad), Lip_R (A), Lip_theta (rad), Lip_phi (rad), Filename\n")
+    for r in ranking:
+        outfile.write("{:.2f}, ".format(r[2].energy))
+        outfile.write("{:.2f}, ".format(r[2].CitA_r    ))
+        outfile.write("{:.2f}, ".format(r[2].CitA_theta))
+        outfile.write("{:.2f}, ".format(r[2].CitA_phi  ))
+        outfile.write("{:.2f}, ".format(r[2].Lip_r     ))
+        outfile.write("{:.2f}, ".format(r[2].Lip_theta ))
+        outfile.write("{:.2f}, ".format(r[2].Lip_phi   ))
+        outfile.write("{}.pdb\n".format(r[1][80:]))
+    outfile.close() 
+
+        # Collective coordinates
+#        self.CitA_r     = 0.0
+#        self.CitA_theta = 0.0
+#        self.CitA_phi   = 0.0
+#        self.Lip_r      = 0.0
+#        self.Lip_theta  = 0.0
+#        self.Lip_phi    = 0.0 
+
+    plot_CitA_collective_coordinates(rankedStructures, unclustered, what)
 
        
 # ============================================================================ #
@@ -206,7 +237,7 @@ def read_all_structures(directories, pickleFileName):
 
 # ============================================================================ #
 
-def plot_CitA_collective_coordinates(structures, what=None):
+def plot_CitA_collective_coordinates(structures, unclustered, what=None):
     """The function name says it"""
 
     # Compile coordinates into array
@@ -218,6 +249,14 @@ def plot_CitA_collective_coordinates(structures, what=None):
     Lip_theta  = np.zeros(len(structures), dtype=np.float)
     Lip_phi    = np.zeros(len(structures), dtype=np.float) 
 
+    unc_energy     = np.zeros(len(unclustered), dtype=np.float) 
+    unc_CitA_r     = np.zeros(len(unclustered), dtype=np.float)
+    unc_CitA_theta = np.zeros(len(unclustered), dtype=np.float)
+    unc_CitA_phi   = np.zeros(len(unclustered), dtype=np.float)
+    unc_Lip_r      = np.zeros(len(unclustered), dtype=np.float)
+    unc_Lip_theta  = np.zeros(len(unclustered), dtype=np.float)
+    unc_Lip_phi    = np.zeros(len(unclustered), dtype=np.float)  
+
     for i, structure in enumerate(structures):
         energy    [i] = structure.energy
         CitA_r    [i] = structure.CitA_r    
@@ -227,6 +266,17 @@ def plot_CitA_collective_coordinates(structures, what=None):
         Lip_theta [i] = structure.Lip_theta  / math.pi * 180.0
         Lip_phi   [i] = structure.Lip_phi    / math.pi * 180.0
 
+    for i, structure in enumerate(unclustered):
+        unc_energy    [i] = structure.energy
+        unc_CitA_r    [i] = structure.CitA_r    
+        unc_CitA_theta[i] = structure.CitA_theta / math.pi * 180.0
+        unc_CitA_phi  [i] = structure.CitA_phi   / math.pi * 180.0
+        unc_Lip_r     [i] = structure.Lip_r     
+        unc_Lip_theta [i] = structure.Lip_theta  / math.pi * 180.0
+        unc_Lip_phi   [i] = structure.Lip_phi    / math.pi * 180.0 
+
+    clustered_energy = energy
+    energy = unc_energy
     # scale energies to 0-1 range for coloring
     # (1 = high energy / bad, 0 = low energy / good
     energy_colors = (energy - min(energy)) / max(energy - min(energy))
@@ -236,7 +286,7 @@ def plot_CitA_collective_coordinates(structures, what=None):
     energy_colors_invert = -1*(((energy - min(energy)) / max(energy - min(energy))) - 1) 
 
     # some plot parameters
-    alpha       = 0.5
+    alpha       = 1.0
     energyScale = 'energy (kcal/mol)'
     lengthUnit  = 'Angstrom'
     angleUnit   = 'Degree'
@@ -246,11 +296,18 @@ def plot_CitA_collective_coordinates(structures, what=None):
     energySpan   = max(energy) - min(energy)
     energyMargin = 0.1
     energyRange  = [min(energy)-energyMargin*energySpan, max(energy)+energyMargin*energySpan]
-    phiRange     = [-180.0, 180.0]
+    energyRange  = [-8430, -7880]
+    phiRange     = [-190.0, 190.0]
     #phiRange     = [100.0, 122.0]
     thetaRange   = [0.0, 180.0]
     #thetaRange   = [30.0, 75.0]
     rRange       = [24.0, 38.0]
+
+    unc_grey  = '0.2'
+    unc_alpha = 0.3
+
+    energy = clustered_energy
+
 
     # Create plot
     fig = plt.figure()
@@ -262,7 +319,8 @@ def plot_CitA_collective_coordinates(structures, what=None):
         what = 'CitA phi'
 
     if what == 'CitA phi':
-        sc = ax.scatter(CitA_phi, energy, c=energy, s=markerSize, cmap=colorMap)
+        sc = ax.scatter(unc_CitA_phi, unc_energy, c=unc_grey, alpha=unc_alpha, s=markerSize, )
+        sc = ax.scatter(CitA_phi    , energy,     c=energy, s=markerSize, cmap=colorMap)
         ax.set_xlabel('CitA phi (' + angleUnit + ')')
         ax.set_ylabel(energyScale)   
         plt.xlim(phiRange)
@@ -272,6 +330,7 @@ def plot_CitA_collective_coordinates(structures, what=None):
         cbar.set_label(energyScale)  
 
     elif what == 'CitA theta':
+        sc = ax.scatter(unc_CitA_theta, unc_energy, c=unc_grey, alpha=unc_alpha, s=markerSize, )
         sc = ax.scatter(CitA_theta, energy, c=energy, s=markerSize, cmap=colorMap)
         ax.set_xlabel('CitA theta (' + angleUnit + ')')
         ax.set_ylabel(energyScale)   
@@ -282,6 +341,7 @@ def plot_CitA_collective_coordinates(structures, what=None):
         cbar.set_label(energyScale)   
 
     elif what == 'CitA r':
+        sc = ax.scatter(unc_CitA_r, unc_energy, c=unc_grey, alpha=unc_alpha, s=markerSize, )
         sc = ax.scatter(CitA_r, energy, c=energy, s=markerSize, cmap=colorMap)
         ax.set_xlabel('CitA r (' + lengthUnit + ')')
         ax.set_ylabel(energyScale)   
@@ -292,6 +352,7 @@ def plot_CitA_collective_coordinates(structures, what=None):
         cbar.set_label(energyScale) 
 
     elif what == 'CitA phi theta':
+        sc = ax.scatter(unc_CitA_phi, unc_CitA_theta, c=unc_grey, alpha=unc_alpha, s=markerSize, )
         sc = ax.scatter(CitA_phi, CitA_theta, c=energy, s=markerSize, cmap=colorMap)
         ax.set_xlabel('CitA phi (' + angleUnit + ')')
         ax.set_ylabel('CitA theta (' + angleUnit + ')')
@@ -307,6 +368,7 @@ def plot_CitA_collective_coordinates(structures, what=None):
 #        s.set_alpha(alpha)
 #        plt.colorbar()
 
+        sc = ax.scatter(unc_CitA_phi, unc_CitA_r, c=unc_grey, alpha=unc_alpha, s=markerSize, )
         sc = ax.scatter(CitA_phi, CitA_r, c=energy, s=markerSize, cmap=colorMap)
         ax.set_xlabel('CitA phi (' + angleUnit + ')')
         ax.set_ylabel('CitA r (' + lengthUnit + ')')
@@ -317,6 +379,7 @@ def plot_CitA_collective_coordinates(structures, what=None):
         cbar.set_label(energyScale) 
 
     elif what == 'CitA theta r':
+        sc = ax.scatter(unc_CitA_theta, unc_CitA_r, c=unc_grey, alpha=unc_alpha, s=markerSize, )
         sc = ax.scatter(CitA_theta, CitA_r, c=energy, s=markerSize, cmap=colorMap)
         ax.set_xlabel('CitA theta (' + angleUnit + ')')
         ax.set_ylabel('CitA r (' + lengthUnit + ')')
@@ -325,6 +388,30 @@ def plot_CitA_collective_coordinates(structures, what=None):
         sc.set_alpha(alpha)
         cbar = plt.colorbar(sc)
         cbar.set_label(energyScale)  
+
+    # ============ #
+
+    elif what == 'CitA r Lip phi':
+        sc = ax.scatter(unc_CitA_r, unc_Lip_phi, c=unc_grey, alpha=unc_alpha, s=markerSize, )
+        sc = ax.scatter(CitA_r, Lip_phi, c=energy, s=markerSize, cmap=colorMap)
+        ax.set_xlabel('CitA theta (' + angleUnit + ')')
+        ax.set_ylabel('CitA r (' + lengthUnit + ')')
+        plt.xlim(rRange)
+        plt.ylim(phiRange) 
+        sc.set_alpha(alpha)
+        cbar = plt.colorbar(sc)
+        cbar.set_label(energyScale)   
+
+    elif what == 'CitA r Lip theta':
+        sc = ax.scatter(unc_CitA_r, unc_Lip_theta, c=unc_grey, alpha=unc_alpha, s=markerSize, )
+        sc = ax.scatter(CitA_r, Lip_theta, c=energy, s=markerSize, cmap=colorMap)
+        ax.set_xlabel('CitA theta (' + angleUnit + ')')
+        ax.set_ylabel('CitA r (' + lengthUnit + ')')
+        plt.xlim(rRange)
+        plt.ylim(thetaRange) 
+        sc.set_alpha(alpha)
+        cbar = plt.colorbar(sc)
+        cbar.set_label(energyScale)    
 
     # ============ #
 
@@ -362,10 +449,68 @@ def plot_CitA_collective_coordinates(structures, what=None):
 
     # ============ #
 
+    elif what == 'CitA phi theta 3D':
+        plt.close()
+        fig = plt.figure()
+
+        #colorMapping = plt.cm.ScalarMappable(norm=energy, cmap=colorMap)
+
+        ax = fig.add_subplot(111, projection='3d')
+        sc = ax.scatter(0, 0, 0, marker='x', c='g', s=200, linewidth=3)
+
+        x = []; y = []; z = []
+        for i in range(len(unc_CitA_phi)):
+            x.append( unc_CitA_r[i] * math.sin(unc_CitA_theta[i]/180.0*math.pi) * math.cos(unc_CitA_phi[i]/180.0*math.pi) )
+            y.append( unc_CitA_r[i] * math.sin(unc_CitA_theta[i]/180.0*math.pi) * math.sin(unc_CitA_phi[i]/180.0*math.pi) )
+            z.append( unc_CitA_r[i] * math.cos(unc_CitA_theta[i]/180.0*math.pi) ) 
+#        sc = ax.scatter(x, y, z, c=unc_grey, marker='o', s=markerSize, cmap=colorMap)
+
+        x = []; y = []; z = []; e = []
+        for i in range(len(CitA_phi)):
+            x.append( CitA_r[i] * math.sin(CitA_theta[i]/180.0*math.pi) * math.cos(CitA_phi[i]/180.0*math.pi) )
+            y.append( CitA_r[i] * math.sin(CitA_theta[i]/180.0*math.pi) * math.sin(CitA_phi[i]/180.0*math.pi) )
+            z.append( CitA_r[i] * math.cos(CitA_theta[i]/180.0*math.pi) )
+            e.append(energy[i])
+        sc = ax.scatter(x, y, z, c=e, s=markerSize, cmap=colorMap)
+        ax.set_xlabel('x (Angstrom)')
+        ax.set_ylabel('y (Angstrom)')
+        ax.set_zlabel('z (Angstrom)')
+        cbar = plt.colorbar(sc)
+        cbar.set_label(energyScale)    
+
+        xmax = max(abs(max(x)), abs(min(x)))
+        ymax = max(abs(max(y)), abs(min(y)))
+        zmax = max(abs(max(z)), abs(min(z)))
+        totalMax = max([xmax, ymax, zmax])
+
+        ax.set_xlim3d([-totalMax, totalMax])
+        ax.set_ylim3d([-totalMax, totalMax])
+        ax.set_zlim3d([-totalMax, totalMax])
+        
+        ax.view_init(elev=8, azim=44)
+
+        box = dict(boxstyle = 'round,pad=0.3', fc = 'yellow', alpha = 0.5)
+#        ax.text3D(x[0]+0.1*xmax, y[0]+0.1*ymax, z[0]+0.1*zmax,"structure {}".format(1) , bbox=box)
+#        ax.text3D(x[1]+0.1*xmax, y[1]+0.1*ymax, z[1]-0.1*zmax,"structure {}".format(2) , bbox=box)
+#        ax.text3D(x[3]+0.1*xmax, y[3]+0.1*ymax, z[3]+0.1*zmax,"structure {}".format(3) , bbox=box)
+#        ax.text3D(x[5]+0.1*xmax, y[5]+0.1*ymax, z[5]-0.1*zmax,"structure {}".format(4) , bbox=box)
+
+        ax.text3D(x[0]-0.1*xmax, y[0]+0.1*ymax, z[0]+0.0*zmax,"structure {}".format(1) , bbox=box)
+        ax.text3D(x[1]-0.1*xmax, y[1]+0.1*ymax, z[1]-0.0*zmax,"structure {}".format(2) , bbox=box)
+        ax.text3D(x[3]-0.1*xmax, y[3]+0.1*ymax, z[3]+0.0*zmax,"structure {}".format(3) , bbox=box)
+        ax.text3D(x[5]-0.1*xmax, y[5]+0.1*ymax, z[5]-0.0*zmax,"structure {}".format(4) , bbox=box) 
+
+
+
+    # ============ #
+
     else:
         print "Plot option not known: {}".format(what)
         sys.exit(1) 
 
+
+    plotname = '_'.join(sys.argv[2:]) + '.pdf'
+    plt.savefig('plots/'+plotname, bbox_inches='tight')
     plt.show()
 
 # ============================================================================ #

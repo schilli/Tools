@@ -161,7 +161,7 @@ def get_window(width, win="const"):
 # ============================================================================ #
 
 
-def running_average(data, width, win="const"):
+def running_average(data, width, win="const", boundary="shrink"):
     """compute running average of data
     Data is a list of values of which to compute the
     running average. The window function to be used 
@@ -169,7 +169,12 @@ def running_average(data, width, win="const"):
     is returned as a numpy array.
     Options are:  const
                   linear
-                  gaussain """
+                  gaussain
+    The boundary can be treated in two ways:
+        either the window shrinks or it gets asymmetric
+                shrink
+                asymmetric"""
+
 
     L = len(data)
     average = np.zeros(L, dtype=float)
@@ -177,24 +182,49 @@ def running_average(data, width, win="const"):
     # loop through data
     for pos1 in range(L):
 
-        # get upper and lower indices for window
-        lower = pos1 - width
-        upper = pos1 + width
-        window = get_window(width, win)
+        if boundary == "shrink":
+            # get upper and lower indices for window
+            lower = pos1 - width
+            upper = pos1 + width
+            window = get_window(width, win)
 
-        if (lower < 0):
-            lower = 0
-            upper = 2*pos1
-            window = get_window(pos1, win)
+            if (lower < 0):
+                lower = 0
+                upper = 2*pos1
+                window = get_window(pos1, win)
 
-        if (upper >= L):
-            lower = pos1-(L-pos1-1)
-            upper = L-1
-            window = get_window(L-pos1-1, win)
+            if (upper >= L):
+                lower = pos1-(L-pos1-1)
+                upper = L-1
+                window = get_window(L-pos1-1, win)
 
 
-        # loop through window
-        for i, pos2 in enumerate(range(lower, upper+1)):
-            average[pos1] += data[pos2] * window[i]
+            # loop through window
+            for i, pos2 in enumerate(range(lower, upper+1)):
+                average[pos1] += data[pos2] * window[i]
+
+
+        elif boundary == "asymmetric":
+            print "{} window not implemented yet".format(boundary)
+            exit(1)
+
+            # get upper and lower indices for window
+            lower = pos1 - width
+            upper = pos1 + width
+            window = get_window(width, win)
+
+            if (lower < 0):
+                lower = 0
+
+            if (upper >= L):
+                upper = L-1
+
+            # loop through window
+            for i, pos2 in enumerate(range(lower, upper+1)):
+                average[pos1] += data[pos2] * window[i] 
+
+        else:
+            print "ERROR: boundary treatment unknown: {}".format(boundary)
+            sys.exit(1)
 
     return average
