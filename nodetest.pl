@@ -1,5 +1,4 @@
 #!/usr/bin/perl -w
-# ToDo: Retrieve raw info
 
 $VERSION = 0.1;
 
@@ -54,6 +53,7 @@ node names are specified with either alias or hostname indices:
 use Getopt::Long;     # command line parsing
 use threads;          # thread module
 use threads::shared;  # enable shared memory for threads
+use Net::SSH::Perl;   # ssh
 
 # ============================================================================ #
 
@@ -86,11 +86,11 @@ $qthreads     = 0;     # threads to use for node load query
 $loglevel     = 1;
 
 %rawInfo = ();         # raw information about jubio node configurations and load
-share(%numCores);      # number of      cores of each jubio node
-share(%freeCores);     # number of free cores of each jubio node
-share(%memory);        #               memory of each jubio node
-share(%freeMem);       #          free memory of each jubio node
-share(%userProcs);     # running processes (or threads) per user on each jubio node (hash of hashes)
+#share(%numCores);      # number of      cores of each jubio node
+#share(%freeCores);     # number of free cores of each jubio node
+#share(%memory);        #               memory of each jubio node
+#share(%freeMem);       #          free memory of each jubio node
+#share(%userProcs);     # running processes (or threads) per user on each jubio node (hash of hashes)
 
 
 &parse_command_line();
@@ -101,9 +101,13 @@ if ($loglevel >= $everything) {
     print "qthreads: $qthreads\n";
 }
 
-&gather_jubio_info(); 
+#&gather_jubio_info(); 
 
-foreach $key (keys(%rawInfo)) {print $key, " - ", @{ $rawInfo{$key} }, "\n";}
+#foreach $key (keys(%rawInfo)) {print $key, " - ", @{ $rawInfo{$key} }, "\n";}
+
+#my $ssh = Net::SSH::Perl->new('iff560c37');
+#my($stdout, $stderr, $exit) = $ssh->cmd('hostname');
+#print "$stdout\n";
 
 # ============================================================================ #
 
