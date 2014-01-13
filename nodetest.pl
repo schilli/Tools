@@ -85,7 +85,13 @@ $everything = 2;
 $qthreads     = 0;     # threads to use for node load query
 $loglevel     = 1;
 
-share(%rawInfo);       # raw information about jubio nodes
+%rawInfo = ();         # raw information about jubio node configurations and load
+share(%numCores);      # number of      cores of each jubio node
+share(%freeCores);     # number of free cores of each jubio node
+share(%memory);        #               memory of each jubio node
+share(%freeMem);       #          free memory of each jubio node
+share(%userProcs);     # running processes (or threads) per user on each jubio node (hash of hashes)
+
 
 &parse_command_line();
 
@@ -97,7 +103,7 @@ if ($loglevel >= $everything) {
 
 &gather_jubio_info(); 
 
-foreach $key (keys(%rawInfo)) {print $key, " - ", $rawInfo{$key}, "\n";}
+foreach $key (keys(%rawInfo)) {print $key, " - ", @{ $rawInfo{$key} }, "\n";}
 
 # ============================================================================ #
 
@@ -208,7 +214,7 @@ sub gather_jubio_info {
 
         # create threads
         while ($thread < $qthreads and $node < @includeNodes) {
-            $threads[$thread] = threads->create('gather_node_info', $includeNodes[$node]);
+            $threads[$thread] = threads->create({'context' => 'list'}, 'gather_node_info', $includeNodes[$node]);
             $thread++;
             $node++;
         }
@@ -217,8 +223,7 @@ sub gather_jubio_info {
         $threadsCreated = $thread;
         for ($thread = 0; $thread < $threadsCreated; $thread++) {
             my $hostname =  $includeNodes[$node - $threadsCreated + $thread];
-            #@{$rawInfo{$hostname}} = $threads[$thread]->join();
-            $threads[$thread]->join();
+            @{$rawInfo{$hostname}} = $threads[$thread]->join();
         } 
     }
 }
@@ -229,20 +234,12 @@ sub gather_jubio_info {
 sub gather_node_info {
     my ($node) = @_;
 
-#    my $hostname = `ssh $node hostname 2>&1`;
-#    chomp($hostname);
-
-    my @info = `ssh $node "hostname; uname" 2>&1`;
+    # retrieve load information
+#    my @info = `ssh $node "hostname; uname" 2>&1`;
+    my @info = `ls -lh`;
     chomp(@info);
-#    print "@info";
 
-    # put info in global array
-#    $rawInfo{$node} = $hostname;
-#    push (@{$rawInfo{$node}}, \@info);
-
-#    my $ID = threads->tid();
-#    print "Thread $ID processing node $hostname\n";
-
+    # return array so we can access it in the enclosing scope
     return @info;
 }
 
