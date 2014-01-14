@@ -50,10 +50,19 @@ node names are specified with either alias or hostname indices:
 # INCLUDE MODULES #
 # =============== #
 
+use warnings;
+#use strict;
 use Getopt::Long;     # command line parsing
 use threads;          # thread module
 use threads::shared;  # enable shared memory for threads
-use Net::SSH::Perl;   # ssh
+#use Net::SSH::Perl;
+
+# check for internal ssh support
+if (eval 'use Net::SSH::Perl') {
+    $internalSSH = 1;
+} else {
+    $internalSSH = 0;
+}
 
 # ============================================================================ #
 
@@ -83,11 +92,13 @@ $everything = 2;
 @excludeNodes = ();    # nodes not to query
 @includeNodes = ();    # nodes to query
 $qthreads     = 0;     # threads to use for node load query
+$pthreads     = 0;     # threads to use for node load parsing
 $loglevel     = 1;
 
 %rawInfo = ();         # raw information about jubio node configurations and load
-#share(%numCores);      # number of      cores of each jubio node
-#share(%freeCores);     # number of free cores of each jubio node
+share(%nodeUp);        # nodes are up (1) or down (0)
+share(%numCores);      # number of      cores of each jubio node
+share(%freeCores);     # number of free cores of each jubio node
 #share(%memory);        #               memory of each jubio node
 #share(%freeMem);       #          free memory of each jubio node
 #share(%userProcs);     # running processes (or threads) per user on each jubio node (hash of hashes)
@@ -101,13 +112,20 @@ if ($loglevel >= $everything) {
     print "qthreads: $qthreads\n";
 }
 
-#&gather_jubio_info(); 
+&gather_jubio_info(); 
+
+&parse_info();
+
+&report_load();
 
 #foreach $key (keys(%rawInfo)) {print $key, " - ", @{ $rawInfo{$key} }, "\n";}
+#foreach $key (keys(%rawInfo)) {print $key, "\n";}
 
-#my $ssh = Net::SSH::Perl->new('iff560c37');
-#my($stdout, $stderr, $exit) = $ssh->cmd('hostname');
-#print "$stdout\n";
+#if ($internalSSH) {
+#    my $ssh = Net::SSH::Perl->new('iff560c37');
+#    my($stdout, $stderr, $exit) = $ssh->cmd('hostname');
+#} else {
+#}
 
 # ============================================================================ #
 
@@ -126,6 +144,7 @@ sub parse_command_line {
         'i|include=s{1,}' => \@includeNodes,
         'e|exclude=s{1,}' => \@excludeNodes,
         'q|qthreads=i'    => \$qthreads,
+        'p|pthreads=i'    => \$pthreads,
         'l|loglevel=i'    => \$loglevel);
 
     # print help and exit if help option was given
@@ -162,7 +181,7 @@ sub hostname_to_alias {
     $_ = $_[0];
 
     if (/iff560c(\d{2})/) {
-        return "jubio" . ($1 - $jubioOffset);
+        return sprintf("jubio%02d", ($1 - $jubioOffset));
 
     } else {
         die "Bad hostname: $_";
@@ -238,13 +257,125 @@ sub gather_jubio_info {
 sub gather_node_info {
     my ($node) = @_;
 
+    my @info;
+
     # retrieve load information
-#    my @info = `ssh $node "hostname; uname" 2>&1`;
-    my @info = `ls -lh`;
+    if ($internalSSH) {
+        my $ssh = Net::SSH::Perl->new('iff560c37');
+    } else {
+        @info = `ssh $node "hostname; cat /proc/cpuinfo /proc/meminfo; ps aux" 2>&1`;
+    }
+
+    #my @info = `ls -lh`;
     chomp(@info);
 
     # return array so we can access it in the enclosing scope
     return @info;
+}
+
+# ============================================================================ #
+
+# parse node load information of all alive jubio nodes
+sub parse_info {
+    my $node = 0;
+    my $thread = 0;
+
+    $idleCores = &idle_cores();
+    if ($pthreads <= 0) {$pthreads = $idleCores;}         # if pthreads is not user specified
+    if ($pthreads <= 0) {$pthreads = 1;}                  # if there are no idle cores
+
+    while ($node < @includeNodes) {
+        $thread = 0;
+
+        # create threads
+        while ($thread < $pthreads and $node < @includeNodes) {
+            $threads[$thread] = threads->create('parse_node_info', $includeNodes[$node]);
+            $thread++;
+            $node++;
+        }
+
+        # join with threads
+        $threadsCreated = $thread;
+        for ($thread = 0; $thread < $threadsCreated; $thread++) {
+            my $hostname =  $includeNodes[$node - $threadsCreated + $thread];
+            $threads[$thread]->join();
+        } 
+    } 
+}
+
+# ============================================================================ #
+
+sub parse_node_info {
+    my ($node) = @_;
+
+    my @info = @{ $rawInfo{$node} };
+
+    $numCores{$node} = 0;
+    $freeCores{$node} = 0;
+
+    # if node is up
+    if (not $info[0] =~ /No route to host/) {
+
+        $nodeUp{$node} = 1;
+
+        # loop through raw info
+        foreach (@info) {
+
+            # count processors
+            if (/^processor\s+:\s+\d+$/) {
+                $numCores{$node} += 1;
+
+            # accumulate load
+            } elsif (/^(\w+)\s+\d+\s+(\d+\.\d+)\s+(\d+\.\d+)/) {
+                $freeCores{$node} += $2;
+            }
+
+        }
+
+    # if node is down
+    } else {
+        $nodeUp{$node} = 0;
+    }
+}
+
+# ============================================================================ #
+
+# estimate the number of idle cores on this machine
+sub idle_cores {
+
+    my $load = 0;
+    foreach (`ps aux`) {
+        if (/^\w+\s+\d+\s+(\d+\.\d+)\s+/) {
+            $load += $1;
+        }
+    }
+
+    my $numCores = 0;
+    foreach (`cat /proc/cpuinfo`) {
+        if (/^processor\s+:\s+\d+$/) {$numCores++;}
+    }
+
+    my $freeCores = $numCores - int($load/100 + 0.99);
+
+    return $freeCores;
+}
+
+# ============================================================================ #
+
+# report load on jubio nodes
+sub report_load {
+
+    foreach $hostname (sort(keys(%nodeUp))) {
+
+        my $alias = hostname_to_alias($hostname);
+
+        if ($nodeUp{$hostname}) {
+            printf "%s\t%s\t%d\t%d\n", $alias, $hostname, $numCores{$hostname}, $freeCores{$hostname};
+        } else {
+            printf "%s\t%s\t down\n", $alias, $hostname;
+        }
+    }
+
 }
 
 # ============================================================================ #
