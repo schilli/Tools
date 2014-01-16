@@ -1,6 +1,6 @@
 #!/usr/bin/perl -w
 
-$VERSION = 0.1;
+my $VERSION = 0.1;
 
 # ============================================================================ #
 
@@ -8,7 +8,7 @@ $VERSION = 0.1;
 # USAGE MESSAGE #
 # ============= #
 
-$USAGE = "nodetest.pl
+my $USAGE = "nodetest.pl
 version $VERSION
 
 Autor:  Oliver Schillinger
@@ -51,18 +51,10 @@ node names are specified with either alias or hostname indices:
 # =============== #
 
 use warnings;
-#use strict;
+use strict;
 use Getopt::Long;     # command line parsing
 use threads;          # thread module
 use threads::shared;  # enable shared memory for threads
-#use Net::SSH::Perl;
-
-# check for internal ssh support
-if (eval 'use Net::SSH::Perl') {
-    $internalSSH = 1;
-} else {
-    $internalSSH = 0;
-}
 
 # ============================================================================ #
 
@@ -72,15 +64,16 @@ if (eval 'use Net::SSH::Perl') {
 
 # Offset of jubio hostname and alias numbering
 #   i. e. jubio01 => iff560c37
-$jubioOffset = 36;
+my $jubioOffset = 36;
 
 # default hostnames
-@defaultHostnames = (1..32);
+my @defaultHostnames = (1..32);
+my $n;
 foreach $n (@defaultHostnames) { $n = &hostname_from_index($n); }
 
 # Loglevels
-#$warnings   = 1;
-$everything = 2;
+#my $warnings   = 1;
+my $everything = 2;
 
 # ============================================================================ #
 
@@ -89,19 +82,19 @@ $everything = 2;
 # ==== # 
 
 # Global variables
-@excludeNodes = ();    # nodes not to query
-@includeNodes = ();    # nodes to query
-$qthreads     = 0;     # threads to use for node load query
-$pthreads     = 0;     # threads to use for node load parsing
-$loglevel     = 1;
+my @excludeNodes = ();    # nodes not to query
+my @includeNodes = ();    # nodes to query
+my $qthreads     = 0;     # threads to use for node load query
+my $pthreads     = 0;     # threads to use for node load parsing
+my $loglevel     = 1;
 
-%rawInfo = ();         # raw information about jubio node configurations and load
-share(%nodeUp);        # nodes are up (1) or down (0)
-share(%numCores);      # number of      cores of each jubio node
-share(%freeCores);     # number of free cores of each jubio node
-share(%memory);        #               memory of each jubio node
-share(%freeMem);       #          free memory of each jubio node
-share(%userProcs);     # running processes (or threads) per user on each jubio node (hash of hashes)
+my %rawInfo = ();                     # raw information about jubio node configurations and load
+my %nodeUp;    share(%nodeUp);        # nodes are up (1) or down (0)
+my %numCores;  share(%numCores);      # number of      cores of each jubio node
+my %freeCores; share(%freeCores);     # number of free cores of each jubio node
+my %memory;    share(%memory);        #               memory of each jubio node
+my %freeMem;   share(%freeMem);       #          free memory of each jubio node
+my %userProcs; share(%userProcs);     # running processes (or threads) per user on each jubio node (hash of hashes)
 
 
 &parse_command_line();
@@ -120,12 +113,6 @@ if ($loglevel >= $everything) {
 
 #foreach $key (keys(%rawInfo)) {print $key, " - ", @{ $rawInfo{$key} }, "\n";}
 #foreach $key (keys(%rawInfo)) {print $key, "\n";}
-
-#if ($internalSSH) {
-#    my $ssh = Net::SSH::Perl->new('iff560c37');
-#    my($stdout, $stderr, $exit) = $ssh->cmd('hostname');
-#} else {
-#}
 
 # ============================================================================ #
 
@@ -156,7 +143,7 @@ sub parse_command_line {
     # parse included nodes
     if (@includeNodes > 0) {
         # transform hostname or alias index into appropriate hostname
-        foreach $node (@includeNodes) { $node = &hostname_from_index($node); }
+        foreach my $node (@includeNodes) { $node = &hostname_from_index($node); }
     } else {
         # if list is empty, put all standard nodes here
         @includeNodes = @defaultHostnames;
@@ -165,10 +152,10 @@ sub parse_command_line {
     # parse excluded nodes
     if (@excludeNodes > 0) {
         # transform hostname or alias index into appropriate hostname
-        foreach $node (@excludeNodes) { $node = &hostname_from_index($node); }
+        foreach my $node (@excludeNodes) { $node = &hostname_from_index($node); }
 
         # remove every excluded node from the include array
-        foreach $node (@excludeNodes) {
+        foreach my $node (@excludeNodes) {
             @includeNodes = grep(!/$node/, @includeNodes);
         }
     }
@@ -232,6 +219,8 @@ sub gather_jubio_info {
     my $thread = 0;
     if ($qthreads == 0) {$qthreads = @includeNodes;}
 
+    my @threads;
+
     while ($node < @includeNodes) {
         $thread = 0;
 
@@ -243,7 +232,7 @@ sub gather_jubio_info {
         }
 
         # join with threads
-        $threadsCreated = $thread;
+        my $threadsCreated = $thread;
         for ($thread = 0; $thread < $threadsCreated; $thread++) {
             my $hostname =  $includeNodes[$node - $threadsCreated + $thread];
             @{$rawInfo{$hostname}} = $threads[$thread]->join();
@@ -260,11 +249,7 @@ sub gather_node_info {
     my @info;
 
     # retrieve load information
-    if ($internalSSH) {
-        my $ssh = Net::SSH::Perl->new('iff560c37');
-    } else {
-        @info = `ssh $node "hostname; cat /proc/cpuinfo; free -m; ps aux" 2>&1`;
-    }
+    @info = `ssh $node "hostname; cat /proc/cpuinfo; free -m; ps aux" 2>&1`;
 
     #my @info = `ls -lh`;
     chomp(@info);
@@ -280,9 +265,11 @@ sub parse_info {
     my $node = 0;
     my $thread = 0;
 
-    $idleCores = &idle_cores();
+    my $idleCores = &idle_cores();
     if ($pthreads <= 0) {$pthreads = $idleCores;}         # if pthreads is not user specified
     if ($pthreads <= 0) {$pthreads = 1;}                  # if there are no idle cores
+    
+    my @threads;
 
     while ($node < @includeNodes) {
         $thread = 0;
@@ -295,7 +282,7 @@ sub parse_info {
         }
 
         # join with threads
-        $threadsCreated = $thread;
+        my $threadsCreated = $thread;
         for ($thread = 0; $thread < $threadsCreated; $thread++) {
             my $hostname =  $includeNodes[$node - $threadsCreated + $thread];
             $threads[$thread]->join();
@@ -315,6 +302,7 @@ sub parse_node_info {
     $memory{$node}    = 0;
     $freeMem{$node}   = 0;
 
+    my %procs; share(%procs);
 
     # if node is up
     if (not $info[0] =~ /No route to host/) {
@@ -332,7 +320,11 @@ sub parse_node_info {
             } elsif (/^(\w+)\s+\d+\s+(\d+\.\d+)\s+(\d+\.\d+)/) {
                 $freeCores{$node} += $2;
 
-                $procs{$1} += 1;
+                if (exists $procs{$1}) {
+                    $procs{$1} += $2 / 100.0;
+                } else {
+                    $procs{$1} = $2 / 100.0;
+                }
             }
 
             if (/^Mem:\s+(\d+)\s+\d+\s+\d+\s+\d+\s+\d+\s+\d+/) {
@@ -346,10 +338,8 @@ sub parse_node_info {
 
         }
 
-        $freeCores{$node} = int($freeCores{$node} / 100 + 0.99);
-
-        my @a = keys(%procs);
-        print "@a\n";
+        #$freeCores{$node} = $numCores{$node} - int($freeCores{$node} / 100.0 + 0.99);
+        $freeCores{$node} = $numCores{$node} - ($freeCores{$node} / 100.0);
 
         $userProcs{$node} = \%procs;
 
@@ -387,19 +377,23 @@ sub idle_cores {
 sub report_load {
 
     printf "Resources reported as (free/total)\n";
-    printf "%7s %9s  %5s   %6s\n", "alias", "hostname", "cores", "memory";
+    printf "%7s %9s    %5s   %6s    %s\n", "alias", "hostname", "cores", "memory", "load per user";
 
-    foreach $hostname (sort(keys(%nodeUp))) {
+    foreach my $hostname (sort(keys(%nodeUp))) {
 
         my $alias = hostname_to_alias($hostname);
 
         if ($nodeUp{$hostname}) {
-            printf "%7s %9s  %2d/%2d  %4.1f/%2d", $alias, $hostname,
+            printf "%7s %9s  %4.1f/%2d  %4.1f/%2d   ", $alias, $hostname,
                                                   $freeCores{$hostname}, $numCores{$hostname},
                                                   $freeMem{$hostname}, $memory{$hostname};
 
-            foreach $key (keys(%{$userProcs{$hostname}})) {
-                print $key, $userProcs{$hostname}{$key};
+            my %procsPerUser = %{$userProcs{$hostname}};
+            foreach my $user (keys(%procsPerUser)) {
+                my $load = $procsPerUser{$user};
+                if ($load > 0.1) {
+                    printf " %s[%.1f]", $user, $load;
+                }
             }
 
             printf "\n";
