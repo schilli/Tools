@@ -99,9 +99,9 @@ $loglevel     = 1;
 share(%nodeUp);        # nodes are up (1) or down (0)
 share(%numCores);      # number of      cores of each jubio node
 share(%freeCores);     # number of free cores of each jubio node
-#share(%memory);        #               memory of each jubio node
-#share(%freeMem);       #          free memory of each jubio node
-#share(%userProcs);     # running processes (or threads) per user on each jubio node (hash of hashes)
+share(%memory);        #               memory of each jubio node
+share(%freeMem);       #          free memory of each jubio node
+share(%userProcs);     # running processes (or threads) per user on each jubio node (hash of hashes)
 
 
 &parse_command_line();
@@ -263,7 +263,7 @@ sub gather_node_info {
     if ($internalSSH) {
         my $ssh = Net::SSH::Perl->new('iff560c37');
     } else {
-        @info = `ssh $node "hostname; cat /proc/cpuinfo /proc/meminfo; ps aux" 2>&1`;
+        @info = `ssh $node "hostname; cat /proc/cpuinfo; free -m; ps aux" 2>&1`;
     }
 
     #my @info = `ls -lh`;
@@ -310,8 +310,11 @@ sub parse_node_info {
 
     my @info = @{ $rawInfo{$node} };
 
-    $numCores{$node} = 0;
+    $numCores{$node}  = 0;
     $freeCores{$node} = 0;
+    $memory{$node}    = 0;
+    $freeMem{$node}   = 0;
+
 
     # if node is up
     if (not $info[0] =~ /No route to host/) {
@@ -325,12 +328,30 @@ sub parse_node_info {
             if (/^processor\s+:\s+\d+$/) {
                 $numCores{$node} += 1;
 
-            # accumulate load
+            # accumulate load and memory utilization
             } elsif (/^(\w+)\s+\d+\s+(\d+\.\d+)\s+(\d+\.\d+)/) {
                 $freeCores{$node} += $2;
+
+                $procs{$1} += 1;
+            }
+
+            if (/^Mem:\s+(\d+)\s+\d+\s+\d+\s+\d+\s+\d+\s+\d+/) {
+                $memory{$node} = int($1/1024 + 0.99);
+            }
+
+            # determine free memory
+            if (/^-\/\+ buffers\/cache:\s+\d+\s+(\d+)$/) {
+                $freeMem{$node} = $1/1024;
             }
 
         }
+
+        $freeCores{$node} = int($freeCores{$node} / 100 + 0.99);
+
+        my @a = keys(%procs);
+        print "@a\n";
+
+        $userProcs{$node} = \%procs;
 
     # if node is down
     } else {
@@ -365,12 +386,23 @@ sub idle_cores {
 # report load on jubio nodes
 sub report_load {
 
+    printf "Resources reported as (free/total)\n";
+    printf "%7s %9s  %5s   %6s\n", "alias", "hostname", "cores", "memory";
+
     foreach $hostname (sort(keys(%nodeUp))) {
 
         my $alias = hostname_to_alias($hostname);
 
         if ($nodeUp{$hostname}) {
-            printf "%s\t%s\t%d\t%d\n", $alias, $hostname, $numCores{$hostname}, $freeCores{$hostname};
+            printf "%7s %9s  %2d/%2d  %4.1f/%2d", $alias, $hostname,
+                                                  $freeCores{$hostname}, $numCores{$hostname},
+                                                  $freeMem{$hostname}, $memory{$hostname};
+
+            foreach $key (keys(%{$userProcs{$hostname}})) {
+                print $key, $userProcs{$hostname}{$key};
+            }
+
+            printf "\n";
         } else {
             printf "%s\t%s\t down\n", $alias, $hostname;
         }
