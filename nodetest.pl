@@ -36,6 +36,7 @@ The following options are recognized:
     -m, --mpd               Switch to start a new mpd ring on the requested hosts
                             Any ring already running will be destroyed
     -j, --interactive       Switch to specify jubio nodes to run on interactively
+    -o, --onlyempty         Use only empty nodes
     -l, --loglevel 2        Set loglevel (1 = only warnings, 2 = everything)
 
 
@@ -52,9 +53,12 @@ node names are specified with either alias or hostname indices:
 
 use warnings;
 use strict;
-use Getopt::Long;     # command line parsing
-use threads;          # thread module
-use threads::shared;  # enable shared memory for threads
+use Getopt::Long;                  # command line parsing
+use threads;                       # thread module
+use threads::shared;               # enable shared memory for threads
+use Term::ANSIColor qw( colored ); # for colored terminal output 
+use List::Util qw(sum);            # to sum a list
+use Time::HiRes qw( time );        # timing function
 
 # ============================================================================ #
 
@@ -96,6 +100,7 @@ my %memory;    share(%memory);        #               memory of each jubio node
 my %freeMem;   share(%freeMem);       #          free memory of each jubio node
 my %userProcs; share(%userProcs);     # running processes (or threads) per user on each jubio node (hash of hashes)
 
+my $starttime = time();
 
 &parse_command_line();
 
@@ -110,6 +115,10 @@ if ($loglevel >= $everything) {
 &parse_info();
 
 &report_load();
+
+my $endtime = time();
+
+printf "Execution time: %.2f seconds.\n", $endtime - $starttime;
 
 #foreach $key (keys(%rawInfo)) {print $key, " - ", @{ $rawInfo{$key} }, "\n";}
 #foreach $key (keys(%rawInfo)) {print $key, "\n";}
@@ -325,6 +334,16 @@ sub parse_node_info {
                 } else {
                     $procs{$1} = $2 / 100.0;
                 }
+
+            # accumulate load and memory utilization (if ps reports load as decimal)
+            } elsif (/^(\w+)\s+\d+\s+(\d+)\s+(\d+\.\d+)/) {
+                 $freeCores{$node} += $2;
+
+                if (exists $procs{$1}) {
+                    $procs{$1} += $2 / 100.0;
+                } else {
+                    $procs{$1} = $2 / 100.0;
+                } 
             }
 
             if (/^Mem:\s+(\d+)\s+\d+\s+\d+\s+\d+\s+\d+\s+\d+/) {
@@ -379,14 +398,30 @@ sub report_load {
     printf "Resources reported as (free/total)\n";
     printf "%7s %9s    %5s   %6s    %s\n", "alias", "hostname", "cores", "memory", "load per user";
 
+    my $emptyNodes     = 0;
+    my $emptyNodeCores = 0;
+
     foreach my $hostname (sort(keys(%nodeUp))) {
 
         my $alias = hostname_to_alias($hostname);
 
         if ($nodeUp{$hostname}) {
-            printf "%7s %9s  %4.1f/%2d  %4.1f/%2d   ", $alias, $hostname,
+
+            my $colorScheme = 'white on_black';
+
+            if ($numCores{$hostname} - $freeCores{$hostname} < 0.1) { 
+                $colorScheme = 'green on_black';
+                $emptyNodes++;
+                $emptyNodeCores += $freeCores{$hostname};
+            }
+            elsif (                    $freeCores{$hostname} < 1.0) { $colorScheme = 'red on_black'; }
+            else { $colorScheme = 'yellow on_black'; }
+
+            my $printText = sprintf "%7s %9s  %4.1f/%2d  %4.1f/%2d   ", $alias, $hostname,
                                                   $freeCores{$hostname}, $numCores{$hostname},
-                                                  $freeMem{$hostname}, $memory{$hostname};
+                                                  $freeMem{$hostname}, $memory{$hostname}; 
+
+            print colored($printText, $colorScheme);
 
             my %procsPerUser = %{$userProcs{$hostname}};
             foreach my $user (keys(%procsPerUser)) {
@@ -396,12 +431,21 @@ sub report_load {
                 }
             }
 
-            printf "\n";
+            print "\n";
+
         } else {
-            printf "%s\t%s\t down\n", $alias, $hostname;
+            my $printText = sprintf "%7s %9s     down            ", $alias, $hostname;
+            print colored($printText, 'black on_red');
+            print "\n";
         }
     }
 
+    my $totalCores     = sum (values(%numCores));
+    my $totalFreeCores = sum (values(%freeCores));
+    my $usedCores = $totalCores - $totalFreeCores;
+    my $load = $usedCores / $totalCores * 100;
+
+    printf "Total JUBIO load: %d%% (%d of %d cores in use, %d cores free, %d empty nodes with %d free cores)\n", $load, $usedCores, $totalCores, $totalFreeCores, $emptyNodes, int($emptyNodeCores+0.5);
 }
 
 # ============================================================================ #
