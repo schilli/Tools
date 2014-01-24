@@ -28,15 +28,14 @@ The following options are recognized:
                             Defaults to total number of queries
     -p, --pthreads 4        Number of threads to use for node data parsing
                             Defaults to the estimated number of idle cores
-    -c, --cmd <command>     Command to execute on jubio as:
+    -c, --cmd \"<command>\"   Command to execute on jubio as (quotes are essential):
                             mpiexec -n <n> <command>
     -n, --nprocs <n>        Number of processes to start
-    --nohup <filename>      Filename for nohup output
-                            If not specified, nohup is not used.
-    -m, --mpd               Switch to start a new mpd ring on the requested hosts
-                            Any ring already running will be destroyed
-    -j, --interactive       Switch to specify jubio nodes to run on interactively
-    -o, --onlyempty         Use only empty nodes
+    --<no>nohup             Use nohup when launching <command> (default) or not
+    --nohupfile <filename>  Filename for nohup output, default is nohup.out
+    -<not>interactive       Interactively specify jubio nodes to run on (default is automatic)
+    -<not>onlyempty         Use only empty nodes (default) or every core that is free
+                            (with a priority for empty nodes)
     -l, --loglevel 2        Set loglevel (1 = only warnings, 2 = everything)
 
 
@@ -72,8 +71,7 @@ my $jubioOffset = 36;
 
 # default hostnames
 my @defaultHostnames = (1..32);
-my $n;
-foreach $n (@defaultHostnames) { $n = &hostname_from_index($n); }
+foreach my $n (@defaultHostnames) { $n = &hostname_from_index($n); }
 
 # Loglevels
 #my $warnings   = 1;
@@ -85,6 +83,7 @@ my $everything = 2;
 # MAIN #
 # ==== # 
 
+
 # Global variables
 my @excludeNodes = ();    # nodes not to query
 my @includeNodes = ();    # nodes to query
@@ -92,6 +91,10 @@ my $qthreads     = 0;     # threads to use for node load query
 my $pthreads     = 0;     # threads to use for node load parsing
 my $nprocs       = 0;     # number of mpi processes to start
 my $cmd          = "";    # command to execute
+my $nohup        = 1;     # if true, use nohup when executing $cmd
+my $nohupfile    = "nohup.out";
+my $interactive  = 0;
+my $onlyempty    = 1;
 my $loglevel     = 1;
 
 my %rawInfo = ();                     # raw information about jubio node configurations and load
@@ -107,15 +110,20 @@ my $starttime = time();
 &parse_command_line();
 
 if ($loglevel >= $everything) {
-    print "PID:      $$\n";
-    print "PPID:     ", &get_ppid(), "\n";
-    print "PPname:   ", &get_parent_name(), "\n";
-    print "exclude:  @excludeNodes\n";
-    print "include:  @includeNodes\n";
-    print "qthreads: $qthreads\n";
-    print "pthreads: $pthreads\n";
-    print "nprocs:   $nprocs\n";
-    print "loglevel: $loglevel\n";
+    #print "PID:         $$\n";
+    #print "PPID:        ", &get_ppid(), "\n";
+    #print "PPname:      ", &get_parent_name(), "\n";
+    print "exclude:     @excludeNodes\n";
+    print "include:     @includeNodes\n";
+    print "qthreads:    $qthreads\n";
+    print "pthreads:    $pthreads\n";
+    print "nprocs:      $nprocs\n";
+    print "cmd:         $cmd\n";
+    print "nohup:       $nohup\n";
+    print "nohupfile:   $nohupfile\n";
+    print "interactive: $interactive\n";
+    print "onlyempty:   $onlyempty\n";
+    print "loglevel:    $loglevel\n";
 }
 
 &gather_jubio_info(); 
@@ -141,11 +149,24 @@ sub parse_command_line {
 
     my $printhelp = 0;
 
+    my $nonohup       = 0;
+    my $nointeractive = 0;
+    my $notonlyempty  = 0;
+
     GetOptions('h|help'   => \$printhelp,
         'i|include=s{1,}' => \@includeNodes,
         'e|exclude=s{1,}' => \@excludeNodes,
         'q|qthreads=i'    => \$qthreads,
         'p|pthreads=i'    => \$pthreads,
+        'c|cmd=s'         => \$cmd,
+        'n|nprocs=i'      => \$nprocs,
+        'nohup'           => \$nohup,
+        'nonohup'         => \$nonohup,
+        'nohupfile=s'     => \$nohupfile,
+        'interactive'     => \$interactive,
+        'notinteractive'  => \$nointeractive,
+        'onlyempty'       => \$onlyempty,
+        'notonlyempty'    => \$notonlyempty,
         'l|loglevel=i'    => \$loglevel);
 
     # print help and exit if help option was given
@@ -173,6 +194,10 @@ sub parse_command_line {
             @includeNodes = grep(!/$node/, @includeNodes);
         }
     }
+
+    if ($nonohup)       {$nohup = 0;}
+    if ($nointeractive) {$interactive = 0;}
+    if ($notonlyempty)  {$onlyempty = 0;}
 }
 
 # ============================================================================ #
@@ -319,7 +344,7 @@ sub parse_node_info {
     my %procs; share(%procs);
 
     # if node is up
-    if (not $info[0] =~ /No route to host/) {
+    if (not $info[0] =~ /No route to host/ and not $info[0] =~ /Could not resolve hostname/) {
 
         $nodeUp{$node} = 1;
 
@@ -426,7 +451,11 @@ sub report_load {
                                                   $freeCores{$hostname}, $numCores{$hostname},
                                                   $freeMem{$hostname}, $memory{$hostname}; 
 
-            print colored($printText, $colorScheme);
+            if (-t STDOUT) {
+                print colored($printText, $colorScheme);
+            } else {
+                print $printText;
+            }
 
             my %procsPerUser = %{$userProcs{$hostname}};
             foreach my $user (keys(%procsPerUser)) {
@@ -440,7 +469,11 @@ sub report_load {
 
         } else {
             my $printText = sprintf "%7s %9s     down            ", $alias, $hostname;
-            print colored($printText, 'black on_red');
+            if (-t STDOUT) {
+                print colored($printText, 'black on_red');
+            } else {
+                print $printText;
+            } 
             print "\n";
         }
     }
@@ -448,7 +481,8 @@ sub report_load {
     my $totalCores     = sum (values(%numCores));
     my $totalFreeCores = sum (values(%freeCores));
     my $usedCores = $totalCores - $totalFreeCores;
-    my $load = $usedCores / $totalCores * 100;
+    my $load = eval { $usedCores / $totalCores * 100 };
+    if ($@ =~ /division by zero/) {$load = 0};
 
     printf "Total JUBIO load: %d%% (%d of %d cores in use, %d cores free, %d empty nodes with %d free cores)\n", $load, $usedCores, $totalCores, $totalFreeCores, $emptyNodes, int($emptyNodeCores+0.5);
 }
@@ -468,4 +502,10 @@ sub get_parent_name {
     foreach (`ps -e`) {
         if (/^$ppid\b.+\b\s+\d\d:\d\d:\d\d\s+(.+)$/) {return $1;}
     }
+}
+
+# ============================================================================ #
+
+# distribute processes over jubio nodes
+sub distribute_procs_over_nodes {
 }
