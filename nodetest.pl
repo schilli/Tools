@@ -90,6 +90,8 @@ my @excludeNodes = ();    # nodes not to query
 my @includeNodes = ();    # nodes to query
 my $qthreads     = 0;     # threads to use for node load query
 my $pthreads     = 0;     # threads to use for node load parsing
+my $nprocs       = 0;     # number of mpi processes to start
+my $cmd          = "";    # command to execute
 my $loglevel     = 1;
 
 my %rawInfo = ();                     # raw information about jubio node configurations and load
@@ -105,9 +107,15 @@ my $starttime = time();
 &parse_command_line();
 
 if ($loglevel >= $everything) {
+    print "PID:      $$\n";
+    print "PPID:     ", &get_ppid(), "\n";
+    print "PPname:   ", &get_parent_name(), "\n";
     print "exclude:  @excludeNodes\n";
     print "include:  @includeNodes\n";
     print "qthreads: $qthreads\n";
+    print "pthreads: $pthreads\n";
+    print "nprocs:   $nprocs\n";
+    print "loglevel: $loglevel\n";
 }
 
 &gather_jubio_info(); 
@@ -119,9 +127,6 @@ if ($loglevel >= $everything) {
 my $endtime = time();
 
 printf "Execution time: %.2f seconds.\n", $endtime - $starttime;
-
-#foreach $key (keys(%rawInfo)) {print $key, " - ", @{ $rawInfo{$key} }, "\n";}
-#foreach $key (keys(%rawInfo)) {print $key, "\n";}
 
 # ============================================================================ #
 
@@ -450,8 +455,17 @@ sub report_load {
 
 # ============================================================================ #
 
-sub hello {
-    my $ID = threads->tid();
-    print "Hello World from thread $ID!\n";
-    return $ID;
+# get pid of parent process
+sub get_ppid {
+    return `cat /proc/$$/status | awk '/^PPid/ {printf "%s", \$2}'`;
+}
+
+# ============================================================================ #
+
+# get name of parent process
+sub get_parent_name {
+    my $ppid = get_ppid();
+    foreach (`ps -e`) {
+        if (/^$ppid\b.+\b\s+\d\d:\d\d:\d\d\s+(.+)$/) {return $1;}
+    }
 }
