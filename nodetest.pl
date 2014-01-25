@@ -69,6 +69,9 @@ use Time::HiRes qw( time );        # timing function
 #   i. e. jubio01 => iff560c37
 my $jubioOffset = 36;
 
+# one minus the threshold until which a cores is considered free
+my $freeCoresThreshold = 0.1;
+
 # default hostnames
 my @defaultHostnames = (1..32);
 foreach my $n (@defaultHostnames) { $n = &hostname_from_index($n); }
@@ -104,6 +107,7 @@ my %freeCores; share(%freeCores);     # number of free cores of each jubio node
 my %memory;    share(%memory);        #               memory of each jubio node
 my %freeMem;   share(%freeMem);       #          free memory of each jubio node
 my %userProcs; share(%userProcs);     # running processes (or threads) per user on each jubio node (hash of hashes)
+my %schedule = ();                    # hash containing the scheduled procs per host
 
 my $starttime = time();
 
@@ -131,6 +135,8 @@ if ($loglevel >= $everything) {
 &parse_info();
 
 &report_load();
+
+&distribute_procs_over_nodes();
 
 my $endtime = time();
 
@@ -258,6 +264,8 @@ sub gather_jubio_info {
     my $thread = 0;
     if ($qthreads == 0) {$qthreads = @includeNodes;}
 
+    %rawInfo = ();
+
     my @threads;
 
     while ($node < @includeNodes) {
@@ -303,6 +311,13 @@ sub gather_node_info {
 sub parse_info {
     my $node = 0;
     my $thread = 0;
+
+    %nodeUp    = ();
+    %numCores  = ();
+    %freeCores = ();
+    %memory    = ();
+    %freeMem   = ();
+    %userProcs = ();
 
     my $idleCores = &idle_cores();
     if ($pthreads <= 0) {$pthreads = $idleCores;}         # if pthreads is not user specified
@@ -442,7 +457,7 @@ sub report_load {
             if ($numCores{$hostname} - $freeCores{$hostname} < 0.1) { 
                 $colorScheme = 'green on_black';
                 $emptyNodes++;
-                $emptyNodeCores += $freeCores{$hostname};
+                $emptyNodeCores += int($freeCores{$hostname} + $freeCoresThreshold);
             }
             elsif (                    $freeCores{$hostname} < 1.0) { $colorScheme = 'red on_black'; }
             else { $colorScheme = 'yellow on_black'; }
@@ -479,12 +494,13 @@ sub report_load {
     }
 
     my $totalCores     = sum (values(%numCores));
-    my $totalFreeCores = sum (values(%freeCores));
+    my $totalFreeCores = 0;
+    foreach my $v (values(%freeCores)) {$totalFreeCores += int($v + $freeCoresThreshold)};
     my $usedCores = $totalCores - $totalFreeCores;
     my $load = eval { $usedCores / $totalCores * 100 };
     if ($@ =~ /division by zero/) {$load = 0};
 
-    printf "Total JUBIO load: %d%% (%d of %d cores in use, %d cores free, %d empty nodes with %d free cores)\n", $load, $usedCores, $totalCores, $totalFreeCores, $emptyNodes, int($emptyNodeCores+0.5);
+    printf "Total JUBIO load: %d%% (%d of %d cores in use, %d cores free, %d empty nodes with %d free cores)\n", $load, $usedCores, $totalCores, $totalFreeCores, $emptyNodes, $emptyNodeCores;
 }
 
 # ============================================================================ #
@@ -508,4 +524,44 @@ sub get_parent_name {
 
 # distribute processes over jubio nodes
 sub distribute_procs_over_nodes {
+
+    # clear schedule
+    %schedule = ();
+
+    my @sortedNodes = sort { $freeCores{$b} <=> $freeCores{$a} } keys %freeCores;
+
+    my $coresScheduled  = 0;
+    my $coresToSchedule = $nprocs;
+
+    # distribute processes
+    foreach my $node (@sortedNodes) {
+
+        my $freeCores = int($freeCores{$node} + $freeCoresThreshold);
+
+        if ($freeCores == 0 or $coresToSchedule == 0) {}
+        elsif ($freeCores <= $coresToSchedule) {
+            $coresScheduled  += $freeCores;
+            $schedule{$node}  = $freeCores;
+            $coresToSchedule -= $freeCores;
+        } elsif ($freeCores > $coresToSchedule) {
+            $coresScheduled  += $coresToSchedule;
+            $schedule{$node}  = $coresToSchedule;
+            $coresToSchedule  = 0;
+        }
+    }
+    
+    # check if distribution was successful
+    if ($coresToSchedule > 0) {
+        die "Not enough free nodes\n";
+    } elsif ($coresScheduled != $nprocs) {
+        die "Number of scheduled cores does not match number of requested cores!\n";
+    } elsif (sum (values(%schedule)) == $nprocs) {
+        print "Successfully scheduled all requested processes!\n";
+    }
+
+    # print result
+    foreach my $node (keys(%schedule)) {
+        print "$node $schedule{$node}\n";
+    }
+
 }
