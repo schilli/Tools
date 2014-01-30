@@ -136,7 +136,11 @@ if ($loglevel >= $everything) {
 
 &report_load();
 
-&distribute_procs_over_nodes();
+if ($cmd ne "") {
+    &distribute_procs_over_nodes();
+}
+
+&check_mpd_ring();
 
 my $endtime = time();
 
@@ -549,13 +553,16 @@ sub distribute_procs_over_nodes {
             $coresToSchedule  = 0;
         }
     }
+
+    my $sumScheduledCores = sum (values(%schedule));
+    if (not defined $sumScheduledCores) { $sumScheduledCores = 0; }
     
     # check if distribution was successful
     if ($coresToSchedule > 0) {
         die "Not enough free nodes\n";
     } elsif ($coresScheduled != $nprocs) {
         die "Number of scheduled cores does not match number of requested cores!\n";
-    } elsif (sum (values(%schedule)) == $nprocs) {
+    } elsif ( $sumScheduledCores == $nprocs) {
         print "Successfully scheduled all requested processes!\n";
     }
 
@@ -564,4 +571,39 @@ sub distribute_procs_over_nodes {
         print "$node $schedule{$node}\n";
     }
 
+}
+
+# ============================================================================ #
+
+# check if an mpd ring is running and functional and if it includes the requested nodes
+sub check_mpd_ring {
+
+    my $thisMachine = `hostname`;
+    chomp($thisMachine);
+
+    if ($thisMachine ne "iff560") { die "ERROR: This script needs to be run on host iff560"; }
+
+    my @mpdtrace = `mpdtrace`;
+    chomp(@mpdtrace);
+    
+
+    my @MPDmachines = ();
+    my $counter     = 0; 
+
+    if ($mpdtrace[0] =~ /cannot connect to local mpd/) { return @MPDmachines; }
+
+    foreach (@mpdtrace) {
+        if (/^(iff560c\d.{2})$/) {
+            $MPDmachines[$counter++] = $1;
+        }
+    }
+
+    return @MPDmachines;
+}
+
+# ============================================================================ #
+
+sub set_up_mpd_ring {
+
+    if ($mpdboot[0] =~ /(iff560c\d.{2}).*Connection refused/) { die "ERROR: Connection refused to host $i. Maybe already an mpd ring running there?"; }
 }
