@@ -495,10 +495,10 @@ def plot_CitA_collective_coordinates(structures, unclustered, what=None):
 #        ax.text3D(x[3]+0.1*xmax, y[3]+0.1*ymax, z[3]+0.1*zmax,"structure {}".format(3) , bbox=box)
 #        ax.text3D(x[5]+0.1*xmax, y[5]+0.1*ymax, z[5]-0.1*zmax,"structure {}".format(4) , bbox=box)
 
-        ax.text3D(x[0]-0.1*xmax, y[0]+0.1*ymax, z[0]+0.0*zmax,"structure {}".format(1) , bbox=box)
-        ax.text3D(x[1]-0.1*xmax, y[1]+0.1*ymax, z[1]-0.0*zmax,"structure {}".format(2) , bbox=box)
-        ax.text3D(x[3]-0.1*xmax, y[3]+0.1*ymax, z[3]+0.0*zmax,"structure {}".format(3) , bbox=box)
-        ax.text3D(x[5]-0.1*xmax, y[5]+0.1*ymax, z[5]-0.0*zmax,"structure {}".format(4) , bbox=box) 
+#        ax.text3D(x[0]-0.1*xmax, y[0]+0.1*ymax, z[0]+0.0*zmax,"structure {}".format(1) , bbox=box)
+#        ax.text3D(x[1]-0.1*xmax, y[1]+0.1*ymax, z[1]-0.0*zmax,"structure {}".format(2) , bbox=box)
+#        ax.text3D(x[3]-0.1*xmax, y[3]+0.1*ymax, z[3]+0.0*zmax,"structure {}".format(3) , bbox=box)
+#        ax.text3D(x[5]-0.1*xmax, y[5]+0.1*ymax, z[5]-0.0*zmax,"structure {}".format(4) , bbox=box) 
 
 
 
