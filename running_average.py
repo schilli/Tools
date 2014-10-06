@@ -206,7 +206,7 @@ def running_average(data, width, win="const", boundary="shrink"):
 
         elif boundary == "asymmetric":
             print "{} window not implemented yet".format(boundary)
-            exit(1)
+            sys.exit(1)
 
             # get upper and lower indices for window
             lower = pos1 - width

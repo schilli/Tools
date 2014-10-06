@@ -19,7 +19,7 @@ def main():
         filename = sys.argv[1]
     else:
         print "Provide a filename: {} <filename>".format(sys.argv[0])
-        exit(1)
+        sys.exit(1)
 
 
     data = XVG(filename)
@@ -65,7 +65,7 @@ class XVG:
 
         if not os.path.isfile(self.filename):
             print "File {} does not exist.".format(self.filename)
-            exit(1)
+            sys.exit(1)
 
         F = open(self.filename, 'r')
         data = F.readlines()
@@ -173,7 +173,7 @@ class XVG:
 
 # ==================================== #
 
-    def smoothen(self, width):
+    def smoothen(self, width, win="gaussian"):
         """smoothen the data with a window function average
         The window width is given in fraction of the number of datapoints"""
 
@@ -185,7 +185,7 @@ class XVG:
 
 
         for i, d in enumerate(self.data):
-            self.data[i] = ra.running_average(d, ww, win="gaussian")
+            self.data[i] = ra.running_average(d, ww, win=win)
 
 
 # ==================================== #
