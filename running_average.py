@@ -161,7 +161,7 @@ def get_window(width, win="const"):
 # ============================================================================ #
 
 
-def running_average(data, width, win="const", boundary="shrink"):
+def running_average(data, width, win="const", boundary="asymmetric"):
     """compute running average of data
     Data is a list of values of which to compute the
     running average. The window function to be used 
@@ -174,7 +174,6 @@ def running_average(data, width, win="const", boundary="shrink"):
         either the window shrinks or it gets asymmetric
                 shrink
                 asymmetric"""
-
 
     L = len(data)
     average = np.zeros(L, dtype=float)
@@ -192,12 +191,10 @@ def running_average(data, width, win="const", boundary="shrink"):
                 lower = 0
                 upper = 2*pos1
                 window = get_window(pos1, win)
-
             if (upper >= L):
                 lower = pos1-(L-pos1-1)
                 upper = L-1
                 window = get_window(L-pos1-1, win)
-
 
             # loop through window
             for i, pos2 in enumerate(range(lower, upper+1)):
@@ -205,19 +202,24 @@ def running_average(data, width, win="const", boundary="shrink"):
 
 
         elif boundary == "asymmetric":
-            print "{} window not implemented yet".format(boundary)
-            sys.exit(1)
-
             # get upper and lower indices for window
             lower = pos1 - width
             upper = pos1 + width
             window = get_window(width, win)
 
-            if (lower < 0):
-                lower = 0
+            if (lower < 0) and (upper >= L):
+                window = window[-lower:L-upper-1]
+                lower  = 0
+                upper  = L-1
+            elif (lower < 0):
+                window = window[-lower:]
+                lower  = 0
+            elif (upper >= L):
+                window = window[:L-upper-1]
+                upper  = L-1
 
-            if (upper >= L):
-                upper = L-1
+            # renormalize window
+            window /= sum(window)
 
             # loop through window
             for i, pos2 in enumerate(range(lower, upper+1)):

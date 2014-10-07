@@ -173,7 +173,7 @@ class XVG:
 
 # ==================================== #
 
-    def smoothen(self, width, win="gaussian"):
+    def smoothen(self, width, win="const"):
         """smoothen the data with a window function average
         The window width is given in fraction of the number of datapoints"""
 
