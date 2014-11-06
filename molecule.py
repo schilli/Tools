@@ -19,6 +19,7 @@ class Molecule(object):
 
     def postprocess(self):
         # create sequence
+        self.sequence = []
         for i, ID in enumerate(self.resid):
             if i == 0 or ID != self.resid[i-1]:
                 self.sequence.append(self.resname[i])
@@ -55,6 +56,11 @@ class Molecule(object):
                     self.Bfactor    .append(1.0)
 
                 self.element    .append(      PDBline[76:78].strip())
+#                if self.element[-1] == "":
+                print "Hier fehlt noch programm!!!"
+                sys.exit(1)
+                    
+
 
                 try:
                     self.charge     .append(      PDBline[79:80].strip())
@@ -66,6 +72,53 @@ class Molecule(object):
                 raise PDBreadError("Something wrong with atom on line: \"{}\"".format(PDBline.rstrip()))
         else:
             raise PDBreadError("Expected ATOM line, found: \"{}\"".format(PDBline.rstrip()))
+
+
+    def select_index(self, indices):
+        """Return molecule of only atoms with given indices"""
+        molecule = Molecule()
+        for i in range(len(self.atomid)):
+            if i in indices:
+                molecule.chainid  .append(self.chainid  [i])
+                molecule.atomid   .append(self.atomid   [i])
+                molecule.atomname .append(self.atomname [i])
+                molecule.resname  .append(self.resname  [i])
+                molecule.resid    .append(self.resid    [i])
+                molecule.occupancy.append(self.occupancy[i])
+                molecule.Bfactor  .append(self.Bfactor  [i])
+                molecule.element  .append(self.element  [i])
+                molecule.charge   .append(self.charge   [i])
+
+                molecule.coordinates.append(self.coordinates[i*3+0])
+                molecule.coordinates.append(self.coordinates[i*3+1])
+                molecule.coordinates.append(self.coordinates[i*3+2]) 
+
+        molecule.postprocess()
+        return molecule
+
+
+
+    def select_CA(self):
+        """Return a molecule of only CA atoms"""
+        indices = []
+        for i in range(len(self.atomid)):
+            if self.atomname[i].strip() == "CA":
+                indices.append(i)
+        molecule = self.select_index(indices)
+
+        return molecule
+
+
+    def select_noh(self):
+        """Return a molecule of only non hydrogen atoms"""
+        indices = []
+        for i in range(len(self.atomid)):
+            if self.atomname[i].find('H') < 0:
+                indices.append(i)
+        molecule = self.select_index(indices)
+
+        return molecule 
+
 
 
 def read_pdb(filename):

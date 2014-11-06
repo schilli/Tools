@@ -9,7 +9,7 @@ def make_Nx3(P):
     return P
 
 
-def center(P):
+def center_points(P):
     """shift the geometric center of the set of points P to the origin
     returns (centeredPoints, center)"""
     P        = make_Nx3(P)
@@ -32,14 +32,14 @@ def rmsd_matrix(P, Q, centered=False):
 
     # center if necessary
     if not centered:
-        P, Pcenter = center(P)
-        Q, Qcenter = center(Q)
+        P, Pcenter = center_points(P)
+        Q, Qcenter = center_points(Q)
     else:
         Pcenter = np.zeros(3)
         Qcenter = np.zeros(3)
 
     # compute covariance matrix
-    A = np.dot(P.T, Q)
+    A = np.dot(Q.T, P)
 
     # singular value decomposition
     V,S,W = np.linalg.svd(A)
@@ -58,7 +58,7 @@ def rmsd_matrix(P, Q, centered=False):
     return U
 
 
-def superimpose(P, Q, centered=False):
+def superimpose(P, Q):
     """superimpose the set of atoms Q on P"""
     # ensure proper shape
     P = make_Nx3(P)
@@ -66,9 +66,8 @@ def superimpose(P, Q, centered=False):
     N = P.shape[0]
 
     # center if necessary
-    if not centered: 
-        P, Pcenter = center(P)
-        Q, Qcenter = center(Q) 
+    P, Pcenter = center_points(P)
+    Q, Qcenter = center_points(Q) 
 
     U = rmsd_matrix(P, Q, centered=True)
 
@@ -80,29 +79,60 @@ def superimpose(P, Q, centered=False):
         Qsuper[n*3:n*3+3] = np.dot(U, Qsuper[n*3:n*3+3])
 
     Qsuper = Qsuper.reshape(N,3)
-    Qsuper += np.meshgrid(Qcenter, Q.shape[0])[0]
+    Qsuper += np.meshgrid(Pcenter, Q.shape[0])[0]
+    Psuper  = P + np.meshgrid(Pcenter, Q.shape[0])[0]
 
-    return Qsuper
+    return Psuper, Qsuper
 
 
 
-def rmsd(P, Q, superimposed=False, centered=False):
-    """Compute the RMSD of two sets of points"""
+def superimpose_ref(P, Q, Pref, Qref):
+    """Superimpose structure Q on P based on the coordinates in Pref and Qref"""
+
+    # ensure proper shape
+    P    = make_Nx3(P)
+    Q    = make_Nx3(Q)
+    Pref = make_Nx3(Pref)
+    Qref = make_Nx3(Qref) 
+    N    = P   .shape[0]
+    Nref = Pref.shape[0]
+
+    # center if necessary
+    P,    Pcenter = center_points(P)
+    Q,    Qcenter = center_points(Q) 
+    Pref, Pcenter = center_points(Pref)
+    Qref, Qcenter = center_points(Qref)  
+
+    U = rmsd_matrix(Pref, Qref, centered=True)
+
+    Qsuper = Q.reshape(3*N, 1)
+    for n in range(N):
+        Qsuper[n*3:n*3+3] = np.dot(U, Qsuper[n*3:n*3+3]) 
+
+    Qsuper = Qsuper.reshape(N,3)
+    Qsuper += np.meshgrid(Pcenter, Q.shape[0])[0]
+    Psuper  = P + np.meshgrid(Pcenter, Q.shape[0])[0]
+
+    return Psuper, Qsuper 
+
+
+
+def rmsd(P, Q, lsfit=True):
+    """Compute the RMSD of two sets of points
+    lsfit determines if a least squares fitting is to be done"""
 
     N = P.size / 3 # number of particlesA
 
-#    if not superimposed:
-#        Qsuper = superimpose(P, Q, centered)
-#    else:
-#        Qsuper = Q
-    Qsuper = Q
+    if lsfit:
+        Psuper, Qsuper = superimpose(P, Q)
+    else:
+        Psuper, Qsuper = (P, Q)
 
-    Qsuper = Qsuper.reshape(3*N, 1)
-#    print N
-#    print P.shape
-#    print Q.shape
-#    print Qsuper.shape
-    diff = P - Qsuper
-#    diff = P - Qsuper.reshape(3*N, 1)
-#    RMSD = np.linalg.norm(diff.reshape(3*N, 1))
-#    return RMSD
+#    diff = P.reshape(3*N) - Qsuper.reshape(3*N)
+#    RMSD = np.sqrt((diff**2).mean())
+    diff = P.reshape(N,3) - Qsuper.reshape(N,3)
+    RMSD = 0
+    for i in range(N):
+        RMSD += np.linalg.norm(diff[i,:])**2
+    RMSD = np.sqrt(RMSD/N) 
+    return RMSD
