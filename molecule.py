@@ -56,11 +56,9 @@ class Molecule(object):
                     self.Bfactor    .append(1.0)
 
                 self.element    .append(      PDBline[76:78].strip())
-#                if self.element[-1] == "":
-                print "Hier fehlt noch programm!!!"
-                sys.exit(1)
-                    
-
+                if self.element[-1] == "":
+                    # find first non digit character of atomname
+                    self.element[-1] = self.atomname[-1].strip(string.digits)[0]
 
                 try:
                     self.charge     .append(      PDBline[79:80].strip())
@@ -105,7 +103,6 @@ class Molecule(object):
             if self.atomname[i].strip() == "CA":
                 indices.append(i)
         molecule = self.select_index(indices)
-
         return molecule
 
 
@@ -113,12 +110,70 @@ class Molecule(object):
         """Return a molecule of only non hydrogen atoms"""
         indices = []
         for i in range(len(self.atomid)):
-            if self.atomname[i].find('H') < 0:
+            if self.element[i] != 'H':
                 indices.append(i)
         molecule = self.select_index(indices)
-
         return molecule 
 
+    def select_protein(self):
+        """Return a molecule of only protein atoms."""
+        indices = []
+        aminoacids = ["ALA", "ARG", "ASN", "ASP", "CYS", "GLU", "GLN", "GLY",
+                      "HIS", "ILE", "LEU", "LYS", "MET", "PHE", "PRO", "SER",
+                      "THR", "TRP", "TYR", "VAL", "ACE", "NME"]
+        for i in range(len(self.atomid)):
+            if self.resname[i] in aminoacids:
+                indices.append(i)
+        molecule = self.select_index(indices)
+        return molecule  
+
+
+    def select_elements(self, *elements):
+        """Return a molecule of only atoms of the given elements
+        Pass elements as list, or separate arguments"""
+        selectedElements = []
+        for item in elements:
+            if type(item) == list or type(item) == tuple:
+                for subitem in item:
+                    if type(subitem) == str:
+                        selectedElements.append(subitem)
+                    else:
+                        raise TypeError("Selection elements should be strings, lists or touples of strings")
+            elif type(item) == str:
+                selectedElements.append(item)
+            else:
+                raise TypeError("Selection elements should be strings, lists or touples of strings")
+
+        indices = []
+        for i in range(len(self.atomid)):
+            if self.element[i] in selectedElements:
+                indices.append(i)
+        molecule = self.select_index(indices)
+        return molecule
+
+
+    def select_chains(self, *chains):
+        """Return a molecule of only atoms of the given chains
+        Pass chains as list, or separate arguments"""
+        selectedChains = []
+        for item in chains:
+            if type(item) == list or type(item) == tuple:
+                for subitem in item:
+                    if type(subitem) == str:
+                        selectedChains.append(subitem)
+                    else:
+                        raise TypeError("Selection chains should be strings, lists or touples of strings")
+            elif type(item) == str:
+                selectedChains.append(item)
+            else:
+                raise TypeError("Selection chains should be strings, lists or touples of strings")
+
+        indices = []
+        for i in range(len(self.atomid)):
+            if self.chainid[i] in selectedChains:
+                indices.append(i)
+        molecule = self.select_index(indices)
+        return molecule 
 
 
 def read_pdb(filename):
