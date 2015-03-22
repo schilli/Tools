@@ -127,6 +127,17 @@ class Molecule(object):
         molecule = self.select_index(indices)
         return molecule  
 
+    def select_backbone(self):
+        """Return a molecule of only backbone atoms"""
+        indices     = []
+        bbAtomnames = ["CA", "C", "N", "O"]
+        for i in range(len(self.atomid)):
+            if self.atomname[i] in bbAtomnames:
+                indices.append(i)
+        molecule = self.select_index(indices)
+        return molecule   
+
+
 
     def select_elements(self, *elements):
         """Return a molecule of only atoms of the given elements
@@ -174,6 +185,57 @@ class Molecule(object):
                 indices.append(i)
         molecule = self.select_index(indices)
         return molecule 
+
+
+    def select_resids(self, *resids):
+        """Return a molecule of only atoms of the given resids
+        Pass resids as list, or separate arguments"""
+        selectedResids = []
+        for item in resids:
+            if type(item) == list or type(item) == tuple:
+                for subitem in item:
+                    if type(subitem) == int:
+                        selectedResids.append(subitem)
+                    else:
+                        raise TypeError("Selection resids should be ints, lists or touples of ints")
+            elif type(item) == int:
+                selectedResids.append(item)
+            else:
+                raise TypeError("Selection resids should be ints, lists or touples of ints")
+
+        indices = []
+        for i in range(len(self.atomid)):
+            if self.resid[i] in selectedResids:
+                indices.append(i)
+        molecule = self.select_index(indices)
+        return molecule  
+
+    def select_residues(self, *residues):
+        """Return a molecule of only atoms of the given residues
+        In contrast to resids, residues always start at 0
+        Pass resids as list, or separate arguments"""
+        selectedResids = []
+        for item in residues:
+            if type(item) == list or type(item) == tuple:
+                for subitem in item:
+                    if type(subitem) == int:
+                        selectedResids.append(subitem)
+                    else:
+                        raise TypeError("Selection resids should be ints, lists or touples of ints")
+            elif type(item) == int:
+                selectedResids.append(item)
+            else:
+                raise TypeError("Selection resids should be ints, lists or touples of ints")
+
+        indices = []
+        residue = 0
+        for i in range(len(self.atomid)):
+            if i > 0 and self.resid[i] != self.resid[i-1]:
+                residue += 1
+            if residue in selectedResids:
+                indices.append(i)
+        molecule = self.select_index(indices)
+        return molecule   
 
 
 def read_pdb(filename):
