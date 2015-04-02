@@ -141,12 +141,13 @@ def compute_distances(data, i):
     return dist
     
 
-def J_nearest_neighbours(data, i, J):
+def J_nearest_neighbours(data, i, J, sortmethod="heapsort"):
     """Return the indices of the J nearest neighbours of datapoint i"""
     dist = compute_distances(data, i)
-    dist = zip(dist, range(len(dist)))
-    dist.sort()
-    neighbours = zip(*dist)[1]
+    #dist = zip(dist, range(len(dist)))
+    #dist.sort()
+    #neighbours = zip(*dist)[1]
+    neighbours = dist.argsort(kind=sortmethod)
     return set(neighbours[1:J+1])
 
 
@@ -180,6 +181,7 @@ def construct_clusters_nonrecursive(neighbours, K, point):
 
             # if child is in cluster
             if me in neighbours[child] and len(neighbours[me].intersection(neighbours[child])) >= K and child not in cluster:   
+           #if                             len(neighbours[me].intersection(neighbours[child])) >= K and child not in cluster:   
                 # add it to cluster
                 cluster.update([child]) 
 
@@ -200,13 +202,10 @@ def construct_cluster(neighbours, K, point, cluster):
     for neighbour in neighbours[point]:
 
         # if two points are mutual neighbours and have K neighbours in common and the neighbour is not yet part of the cluster
-        if point in neighbours[neighbour] and \
-                len(neighbours[point].intersection(neighbours[neighbour])) >= K and \
-                neighbour not in cluster: 
+        if point in neighbours[neighbour] and len(neighbours[point].intersection(neighbours[neighbour])) >= K and neighbour not in cluster: 
 
-#        # if have K neighbours in common and the neighbour is not yet part of the cluster
-#        if len(neighbours[point].intersection(neighbours[neighbour])) >= K and \
-#                neighbour not in cluster:  
+        # if have K neighbours in common and the neighbour is not yet part of the cluster
+       #if                                    len(neighbours[point].intersection(neighbours[neighbour])) >= K and neighbour not in cluster: 
 
             construct_cluster(neighbours, K, neighbour, cluster)
 
