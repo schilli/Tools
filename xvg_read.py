@@ -39,9 +39,10 @@ class XVG:
 
         self.filename = filename
 
-        self.nfields = 0   # number of data fields
-        self.xdata   = []  # time series or similar
-        self.data    = []  # list of data series as numpy arrays
+        self.nfields    = 0   # number of data fields
+        self.xdata      = []  # time series or similar
+        self.data       = []  # list of data series as numpy arrays
+        self.datalabels = [] # labels for legend
 
         self.mean       = []  # mean per series
         self.mean_start = []  # average of per series first x percent
@@ -89,7 +90,7 @@ class XVG:
 
 
         data = data[l:]
-        self.nfields = len(data[0].split())
+        #self.nfields = len(data[0].split())
 
 
         # allocate memory
@@ -145,7 +146,9 @@ class XVG:
 #                self.plot_axis.append(float(s.split(',')[0]))
 
         elif fields[1][0] == 's' and int(fields[1][1:]) >= 0:
-            self.nfields = int(fields[1][1:]) + 1
+            if int(fields[1][1:]) >= self.nfields:
+                self.nfields = int(fields[1][1:]) + 1
+            self.datalabels.append(fields[3].split("\"")[1])
 
 
 # ==================================== #
