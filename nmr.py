@@ -3,7 +3,10 @@
 from __future__ import print_function
 
 import sys
+import mdtraj
 import numpy as np
+from mpi4py import MPI
+
 
 def _fit_trajectory(trajectory, fitframe=0, reference=None, selectiontext="name CA", parallel=True):
     """
@@ -121,14 +124,27 @@ def _check_corr_convergence(corr, diffThreshold=0.02, stdThreshold=0.02):
  
 
 
-def S2(trajectory, verbose=True):
-    """Compute S2 order parameters from an MDTRAJ trajectory"""
+def compute_S2(trajectory=None, filenames=None, verbose=True, parallel=True):
+    """
+    Compute S2 order parameters from an MDTRAJ trajectory
+    Input:
+        Either an MDTRAJ trajectory or a dictionary: {"top": topfilename, "trj": trjfilename}
+    Return:
+        S2 values
+        boolean array indicating convergence
+        NHinfo dictionary with information on bondlength resids and resnames
+        NHvec correlation functions
+    """
+
+    if trajectory == None:
+        trajectory = mdtraj.load(filenames["trj"], top=filenames["top"])
 
     # superpose trajectory on first frame based on C alhpa atoms
     _fit_trajectory(trajectory, fitframe=0)
 
     # compute NH bond vectors
     NHvec, NHbondlength, NHresids, NHresnames = _get_NH_bond_vectors(trajectory)
+    NHinfo = {"bondlength": NHbondlength, "resids": NHresids, "resnames": NHresnames}
 
     # compute correlation functions of NH bond vectors
     corr, corr_std, corr_stdmean = _compute_bond_vector_correlation_function(NHvec, verbose=verbose)
@@ -136,9 +152,164 @@ def S2(trajectory, verbose=True):
     # check convergence of correlation functions and compute S2 values
     S2, convergence = _check_corr_convergence(corr)
 
-    return S2, convergence
+    return S2, convergence, NHinfo, corr
 
 
+
+
+
+def compute_S2_batch(trajectorylist=None, filenamelist=None, only_converged=True, verbose=True):
+    """
+    Batch version of compute_S2().
+    Processes a list of trajectories or a list of {top, trj} filename dictionaries
+    and computes the average S2 and standard deviation.
+    Input:
+        Either a list of MDTRAJ trajectories or a list of {top, trj} filename dictionaries.
+        only_converged: Use only converged bond vector correlation functions for averaging.
+    Return:
+        Mean S2 values
+        standard deviations
+        number of converged correlation funtions
+        NHinfo dictionary with information on bondlength resids and resnames
+        NHcorr correlation functions of shape (nsims, nvec, nframes/2)
+    """
+    
+    S2list        = []
+    convergedlist = []
+    corrlist      = []
+
+    # compute S2 for each individual MD Dataset
+    if trajectorylist == None:
+        for trj_ndx, filenames in enumerate(filenamelist):
+            if verbose:
+                print("Dataset {} of {} ({})".format(trj_ndx+1, len(filenamelist), filenames["trj"]))
+            nextS2, nextConverged, NHinfo, corr = compute_S2(filenames=filenames, verbose=verbose)
+            S2list.append(nextS2)
+            convergedlist.append(nextConverged)
+            corrlist.append(corr)
+    else:
+        for trj_ndx, trajectory in enumerate(trajectorylist):
+            if verbose:
+                print("Dataset {} of {}".format(trj_ndx+1, len(trajectorylist)))
+            nextS2, nextConverged, NHinfo, corr = compute_S2(trajectory=trajectory, verbose=verbose)
+            S2list.append(nextS2)
+            convergedlist.append(nextConverged) 
+            corrlist.append(corr)
+        
+
+    # Compute mean, std, etc.
+    S2mean     = np.zeros_like(S2list[0])
+    S2array    = np.zeros([S2mean.shape[0], len(S2list)], dtype=np.float)
+    nconverged = np.zeros_like(convergedlist[0], dtype=np.int)
+    NHcorr     = np.zeros([len(S2list), corrlist[0].shape[0], corrlist[0].shape[1]], dtype=np.float)
+
+    for S2_idx, nextS2 in enumerate(S2list):
+        nextConverged = convergedlist[S2_idx]
+        if only_converged:
+            S2mean[nextConverged] += nextS2[nextConverged]
+        else:
+            S2mean += nextS2
+        nconverged += nextConverged
+        S2array[:,S2_idx]  = nextS2
+        NHcorr[S2_idx,:,:] = corrlist[S2_idx]
+
+    largerZero = nconverged > 0
+    S2mean[largerZero] /= nconverged[largerZero] 
+    S2std = S2array.std(1)
+
+    return S2mean, S2std, nconverged, NHinfo, NHcorr
+
+
+def compute_S2_batch_mpi(trajectorylist=None, filenamelist=None, only_converged=True):
+    """
+    Batch version of compute_S2() with mpi4py parallelization.
+    Processes a list of trajectories or a list of {top, trj} filename dictionaries
+    and computes the average S2 and standard deviation.
+    Input:
+        Either a list of MDTRAJ trajectories or a list of {top, trj} filename dictionaries.
+        only_converged: Use only converged bond vector correlation functions for averaging.
+    Return:
+        Mean S2 values
+        standard deviations
+        number of converged correlation funtions
+        NHinfo dictionary with information on bondlength resids and resnames
+    """
+
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+    size = comm.Get_size()
+    
+    S2list        = []
+    convergedlist = []
+    corrlist      = []
+
+    # compute S2 for each individual MD Dataset
+    if trajectorylist == None:
+        for trj_ndx, filenames in enumerate(filenamelist):
+            if trj_ndx % size == rank:
+                print(rank, trj_ndx); sys.stdout.flush()
+                nextS2, nextConverged, NHinfo, corr = compute_S2(filenames=filenames, verbose=False, parallel=False)
+                S2list.append(nextS2)
+                convergedlist.append(nextConverged)
+                corrlist.append(corr)
+            elif rank == 0:
+                S2list.append(trj_ndx % size) # rank of process that rank 0 should receive this part of the data from
+    else:
+        for trj_ndx, trajectory in enumerate(trajectorylist):
+            if trj_ndx % size == rank:
+                nextS2, nextConverged, NHinfo, corr = compute_S2(trajectory=trajectory, verbose=False, parallel=False)
+                S2list.append(nextS2)
+                convergedlist.append(nextConverged) 
+                corrlist.append(corr)
+            elif rank == 0:
+                S2list.append(trj_ndx % size) # rank of process that rank 0 should receive this part of the data from
+        
+
+    # Compute mean, std, etc.
+    if rank == 0:
+        S2mean     = np.zeros_like(S2list[0])
+        S2array    = np.zeros([S2mean.shape[0], len(S2list)], dtype=np.float)
+        nconverged = np.zeros_like(convergedlist[0], dtype=np.int)
+        NHcorr     = np.zeros([len(S2list), corrlist[0].shape[0], corrlist[0].shape[1]], dtype=np.float)
+
+        for S2_idx, nextS2 in enumerate(S2list):
+
+            if type(nextS2) == type(int()):
+                sendingRank   = nextS2
+                nextS2        = np.zeros_like(S2list[0])
+                nextConverged = np.zeros_like(convergedlist[0])
+                nextCorr      = np.zeros_like(corrlist[0])
+                comm.Recv(nextS2,        source=sendingRank, tag=0)
+                comm.Recv(nextConverged, source=sendingRank, tag=1)
+                comm.Recv(nextCorr,      source=sendingRank, tag=2)
+
+            else:
+                nextConverged = convergedlist[S2_idx]
+                nextCorr      = corrlist[S2_idx]
+
+            if only_converged:
+                S2mean[nextConverged] += nextS2[nextConverged]
+            else:
+                S2mean += nextS2
+            nconverged += nextConverged
+            S2array[:,S2_idx] = nextS2
+            NHcorr[S2_idx,:,:] = nextCorr
+
+        largerZero = nconverged > 0
+        S2mean[largerZero] /= nconverged[largerZero]
+        S2std = S2array.std(1)
+
+        return S2mean, S2std, nconverged, NHinfo, NHcorr
+
+    else:
+        for S2_idx, nextS2 in enumerate(S2list):
+            comm.Send(nextS2,                dest=0, tag=0)
+            comm.Send(convergedlist[S2_idx], dest=0, tag=1)
+            comm.Send(corrlist[S2_idx],      dest=0, tag=2)
+            
+
+        return None, None, None, None, None
+ 
 
 
 
