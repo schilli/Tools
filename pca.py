@@ -1,8 +1,10 @@
 import pca
 import sys, time
 import numpy as np
+import sklearn.cluster as skc
 import scipy.constants as const
 import matplotlib.pyplot as plt
+from collections import Counter
 
 
 def linear_testdata(n=100):
@@ -32,15 +34,18 @@ def test(n=100):
 
 
 
-def pca(data):
+def pca(data, project=False):
     """Compute the principal components of the given data based on eigenvalue decomposition
     Input:
         data: First index (rows) are variables,
               second index (columns) are observations
+        project: Whether to project the input data on the principal components
     Returns:
         (eigvals, eigvecs)
         Eigenvalues are sorted in decreasing order,
         The corresponding eigenvectors are the columns of the second returned array.
+        If project is True:
+        (eigvals, eigvecs, projectedData)
     """
 
     # diagonalize covariance matrix
@@ -57,23 +62,40 @@ def pca(data):
         eigvals      [  i] = eigval
         sortedeigvecs[:,i] = eigvec
 
-    return eigvals, sortedeigvecs
+    if project:
+        # Project data on principal components
+        projectedData = np.zeros_like(data)
+        for point_idx in range(data.shape[1]):
+            for eig_idx in range(eigvecs.shape[0]):
+                projectedData[eig_idx, point_idx] = np.dot(eigvecs[:,eig_idx], data[:,point_idx]) 
+        return eigvals, sortedeigvecs, projectedData
+
+    else:
+        return eigvals, sortedeigvecs
 
 
 
-def dpca(dihedrals):
+def dpca(dihedrals, unit='degree'):
     """Perform a dihedral pca
     Input:
         Dihedral angle data: rows (first index) are the angles and
                              columns (second index) observations
+        unit: degree or radian
     Returns:
         Array of coordinates in the space spanned by the dihedral principal components
     """
 
     # Create cartesian coordinate space of x = cos(phi), y = sin(phi)
     cartcoords = np.zeros([2 * dihedrals.shape[0], dihedrals.shape[1]], dtype=np.float)
-    cosines = np.cos(const.pi / 180.0 * dihedrals)
-    sines   = np.sin(const.pi / 180.0 * dihedrals)
+    if unit == "degree":
+        cosines = np.cos(const.pi / 180.0 * dihedrals)
+        sines   = np.sin(const.pi / 180.0 * dihedrals)
+    elif unit == "radian":
+        cosines = np.cos(dihedrals)
+        sines   = np.sin(dihedrals) 
+    else:
+        print "Angular unit must be degree or radian but not {}".format(unit)
+        sys.exit(0)
     cos_idx = np.arange(0,2*dihedrals.shape[0],2)
     sin_idx = np.arange(1,2*dihedrals.shape[0],2)
     cartcoords[cos_idx,:] = cosines
@@ -256,12 +278,21 @@ def cluster_jarvis_patrick(data, J=5, K=3, cutoff=None, dim="all", verbose=False
     # construct neighbour lists
     starttime = time.time()
     neighbours = []
+    neighbourListSize = 0 # number of integers stored
     if cutoff == None:
         for i in range(data.shape[1]):
             neighbours.append(J_nearest_neighbours(data, i, J))
+            neighbourListSize += len(neighbours[-1])
+            if neighbourListSize * sys.getsizeof(int()) > 4*1024**3:
+                print "Neighbour lists are getting too large! Too large cutoff?"
+                sys.exit(1)
     else:
         for i in range(data.shape[1]):
             neighbours.append(nearest_neighbours_cutoff(data, i, cutoff))
+            neighbourListSize += len(neighbours[-1])
+            if neighbourListSize * sys.getsizeof(int()) > 4*1024**3:
+                print "Neighbour lists are getting too large! Too large cutoff?"
+                sys.exit(1) 
     endtime = time.time()
     if verbose:
         print "Neighbour list construction took {:.2e} sec.".format(endtime - starttime)
@@ -283,6 +314,7 @@ def cluster_jarvis_patrick(data, J=5, K=3, cutoff=None, dim="all", verbose=False
 
 
     # sort clusters
+    starttime = time.time()
     sizes = [len(c) for c in clusters]
     sizesClusters = zip(sizes, clusters)
     sizesClusters.sort()
@@ -296,6 +328,10 @@ def cluster_jarvis_patrick(data, J=5, K=3, cutoff=None, dim="all", verbose=False
             if i in cluster:
                 trajectory[i] = c
                 continue
+    endtime = time.time()
+    if verbose:
+        print "Sorting clusters took {:.2e} sec.".format(endtime - starttime) 
+ 
 
     centers = central_structures(clusters, coord)
 
@@ -306,5 +342,81 @@ def cluster_jarvis_patrick(data, J=5, K=3, cutoff=None, dim="all", verbose=False
 
 
 
+
+
+def cluster_affinity_propagation(data, memlim=10):
+    """Cluster data (rows = coordinates; columns = observations)
+    with the affinity propagation algorithm from scikit learn.
+    memlim:  memory limit in GB
+    """ 
+    ndim, nsamples = data.shape
+    if nsamples**2*8.0/1024**3 > memlim:
+        print "Distance matrix would be larger than {} GB. Aborting.".format(memlim)
+        sys.exit(1)
+
+    # compute distance matrix
+    dist = np.zeros([nsamples, nsamples])
+    for i in range(nsamples):
+        dist[:,i] = compute_distances(data, i)
+        dist[i,:] = dist[:,i]
+
+    centers, featureTrj = skc.affinity_propagation(dist, copy=False, damping=0.5)
+    nclusters = centers.shape[0]
+    populations = Counter(featureTrj)
+#    print populations
+#    print centers
+#    print featureTrj
+
+    # sort clusters by size
+    popsunsrt = np.array([int(i) for i in populations.values()]) / (1.0 * nsamples)
+    indxunsrt = np.array(populations.keys())
+    indxsrt   = np.argsort(popsunsrt)[::-1]
+    popsrt    = popsunsrt[indxsrt]
+    centersrt = centers[indxsrt]
+
+    # renumber featureTrj
+    featureTrjsrt = np.zeros_like(featureTrj, dtype=np.int)
+    clusters = []
+    for c in range(nclusters):
+        where = featureTrj == c
+        featureTrjsrt[where] = indxsrt[c]
+        clusters.append(set(np.where(featureTrjsrt == c)[0]))
+
+#    return popsrt, clusters, centersrt, featureTrjsrt
+    return populations, clusters, centers, featureTrj
+
+
+def plot_clusters(data, featureTrj, centers):
+    nclusters = len(centers)
+    clustercolors = plt.cm.rainbow(np.linspace(0,1,nclusters))
+    fig = plt.figure()
+    axs = fig.add_subplot(111)
+    for p in range(data.shape[1]):
+        axs.plot(data[0,p], data[1,p], 'o', color=clustercolors[featureTrj[p]])
+    for i, c in enumerate(centers):
+        axs.plot(data[0,c], data[1,c], '*',
+                markerfacecolor=clustercolors[i], markersize=25, markeredgewidth=2, label="cluster {}".format(i))
+    axs.legend(numpoints=1)
+    #axs.set_xlim(0,1)
+    #axs.set_ylim(0,1)
+    plt.show()
+
+
+
+def multiple_2d_gaussians(n=100, g=3):
+    """Generate n points from g 2D gaussian distributions"""
+
+    centers = np.random.rand(2,g)
+    stdev   = 0.05 + 0.15 * np.random.rand(2,g)
+
+    data   = np.zeros([2,n])
+    labels = np.zeros(n, dtype=np.int)
+    for i in range(n):
+        d = centers[:,i%g].reshape([2,1]) + stdev[:,i%g].reshape([2,1]) * np.random.randn(2,1)
+        data[:,i] = d.reshape(2)
+        labels[i] = i%g
+
+    np.random.shuffle(data.T)
+    return data, labels
 
 
