@@ -5,7 +5,12 @@ from __future__ import print_function
 import sys
 import mdtraj
 import numpy as np
+import matplotlib.pyplot as plt
+from scipy.optimize import curve_fit
 from mpi4py import MPI
+
+
+# ============================================================================ #
 
 
 def _fit_trajectory(trajectory, fitframe=0, reference=None, selectiontext="name CA", parallel=True):
@@ -24,6 +29,8 @@ def _fit_trajectory(trajectory, fitframe=0, reference=None, selectiontext="name 
     fit_atomndx = trajectory.topology.select(selectiontext)
     trajectory.superpose(trajectory, fitframe, atom_indices=fit_atomndx, parallel=parallel)
 
+
+# ============================================================================ #
 
 
 def _get_NH_bond_vectors(trajectory, Natomname='N', Hatomname='H', startresid=1):
@@ -59,6 +66,8 @@ def _get_NH_bond_vectors(trajectory, Natomname='N', Hatomname='H', startresid=1)
 
     return NHvec, NHbondlength, NHresids, NHresnames
 
+
+# ============================================================================ #
 
 
 def _compute_bond_vector_correlation_function(bondvec, verbose=True):
@@ -99,6 +108,8 @@ def _compute_bond_vector_correlation_function(bondvec, verbose=True):
     return corr, corr_std, corr_stdmean
 
 
+# ============================================================================ #
+
 
 def _check_corr_convergence(corr, diffThreshold=0.02, stdThreshold=0.02):
     """
@@ -120,11 +131,198 @@ def _check_corr_convergence(corr, diffThreshold=0.02, stdThreshold=0.02):
     convergence       = np.logical_and(difference < diffThreshold, stdev < stdThreshold)
     return fourthQuarterMean, convergence
 
+
+# ============================================================================ #
+
+
+def _single_exp(x, a, tau):
+    """
+    Single exponential: y = (1-a) * exp(x/(-1*tau)) + a
+    """
+    return (1-a) * np.exp(x/(-1*tau)) + a
+
+
+# ============================================================================ #
+
+
+def _double_exp(x, a, b, tau1, tau2):
+    """
+    Double exponential: y = (1-a-b) * exp(x/(-1*tau1)) + a * exp(x/(-1*tau2)) + b
+    """
+    return (1-a-b) * np.exp(x/(-1*tau1)) + a * np.exp(x/(-1*tau2)) + b
+
+
+# ============================================================================ #
+
+
+def _double_exp2(x, a, tau1, tau2):
+    return (0.75-a) * np.exp(x/(-1*tau1)) + a * np.exp(x/(-1*tau2)) + 0.25
+
+
+# ============================================================================ #
+
+
+def _n_exp(x, *args):
+    """
+    n exponentials depending on the length of *args.
+    n coefficients and n exponential decay constants are expected.
+    Example:
+    _n_exp(x, a, b, c, t1, t2, t3)
+    """
+    coefficients = args[:len(args)/2]
+    decayconst   = args[len(args)/2:]
+
+    y = 0
+    for i, c, t in zip(range(len(decayconst)), coefficients, decayconst):
+        y += c * np.exp(x/(-1*t))
+    y += 1 - sum(coefficients)
+
+    return y
+
+
+# ============================================================================ #
+
+
+def _corr_fit(corr, dt=1, nexp=1, guess=None):
+    """
+    Fit a sum of exponentials to the correlation functions and report its parameters
+    Input:
+        corr:   Correlation functions of shape (nfunctions, timesteps)
+        dt:     Delta t of subsequent correlation function values
+        nexp:   Number of exponentials for fit
+        guess:  Initial guess of coefficients and decay constants, if None, initialized to 1's.
+    """
+    xdata     = np.linspace(0, dt*corr.shape[1], corr.shape[1])
+    coeffs    = np.zeros([corr.shape[0], nexp+1])
+    coeffsstd = np.zeros([corr.shape[0], nexp+1])
+    tconst    = np.zeros([corr.shape[0], nexp])
+    tconststd = np.zeros([corr.shape[0], nexp])
+
+    # Make np.exp() over and underflows throw an exception
+    old_err_settings = np.seterr(over='ignore', under='ignore')
+
+    for c in range(corr.shape[0]):
+        print("\r", c, end="")
+
+        # fit exponentials
+        if guess == None:
+            p0 = 2 * nexp * [1.0]
+        else:
+            p0 = guess
+        successful     = False
+        counter        = 1 
+        nrandomguesses = 100
  
+        while not successful:
+            try: 
+                popt, pcov = curve_fit(_n_exp, xdata, corr[c,:], p0=p0)
+                if not float('NaN') in np.diag(pcov)**0.5:
+                    successful = True
+                else:
+                    print("curve_fit failed with NaN error estimates")
+            except:
+                # change initial parameter guess
+                if counter == 1 and c > 0:
+                    # second try with optimized values from previous iteration
+                    print("    trying previously optimized parameters as initial guess")
+                    p0 = list(coeffs[c-1,:-1]) + list(tconst[c-1,:])
+                elif counter == 2 and c > 0:
+                    # third try with mean of optimized values from previous iterations
+                    print("    trying mean of previously optimized parameters as initial guess")
+                    p0 = list(coeffs[:c-1,:-1].mean(0)) + list(tconst[:c-1,:].mean(0)) 
+                elif counter < 2 + nrandomguesses:
+                    # continue trying random values
+                    print("    trying random parameters as initial guess", counte)
+                    p0 = np.random.rand(len(p0)) + 10**np.random.randint(0, 4, size=len(p0))
+                else:
+                    # failed
+                    print("    failed to converge fitting")
+                    popt = float('Nan') * np.ones([len(p0)         ])
+                    pcov = float('Nan') * np.ones([len(p0), len(p0)])
+                    successful = True
+
+            counter += 1
+
+
+        # extract fittet parameters and errors
+        stdevs           = np.sqrt(np.diag(pcov))
+        coeffs[c,:-1]    = popt[:len(popt)/2]
+        coeffs[c, -1]    = 1 - sum(popt[:len(popt)/2])
+        tconst[c,:  ]    = popt[len(popt)/2:]
+        coeffsstd[c,:-1] = stdevs[:len(popt)/2]
+        coeffsstd[c, -1] = (stdevs[:len(popt)/2]**2).sum()**0.5
+        tconststd[c,:  ] = stdevs[len(popt)/2:]
+
+        # sort by magnitude of decay constant
+        srtIndx          = np.argsort(tconst[c,:])
+        tconst   [c,:  ] = tconst   [c,srtIndx]
+        coeffs   [c,:-1] = coeffs   [c,srtIndx]
+        tconststd[c,:  ] = tconststd[c,srtIndx]
+        coeffsstd[c,:-1] = coeffsstd[c,srtIndx]
+
+    # restore error settings
+    np.seterr(**old_err_settings)
+
+    return coeffs, tconst, coeffsstd, tconststd
+
+
+
+#        if fit == 'single':
+#            popt, pcov = curve_fit(_single_exp, xdata, corr[c,:], p0=[0.5, 100])
+#            S2[c]      = popt[0]
+#            tau1[c]    = popt[1]
+#            S2std[c], tau1std[c] = np.sqrt(np.diag(pcov))
+#        elif fit == 'double':
+#            popt, pcov = curve_fit(_double_exp, xdata, corr[c,:], p0=[0.1, 0.1, 100, 5])
+#            a[c]       = popt[0]
+#            S2[c]      = popt[1]
+#            tau1[c]    = popt[2]
+#            tau2[c]    = popt[3]
+#            astd[c], S2std[c], tau1std[c], tau2std[c] = np.sqrt(np.diag(pcov)) 
+#        elif fit == 'double2':
+#            popt, pcov = curve_fit(_double_exp2, xdata, corr[c,:], p0=[0.75/2, 100, 5])
+#            a[c]       = popt[0]
+#            tau1[c]    = popt[1]
+#            tau2[c]    = popt[2]
+#            astd[c], tau1std[c], tau2std[c] = np.sqrt(np.diag(pcov))  
+#        else:
+#            print("fit must be single or double")
+#            sys.exit(1)
+#
+#    return a, S2, tau1, tau2, astd, S2std, tau1std, tau2std
  
 
 
-def compute_S2(trajectory=None, filenames=None, verbose=True, parallel=True):
+# ============================================================================ #
+
+
+def _plot_fit(corr, coeffs, tconst, dt=1, c=0):
+
+    fig = plt.figure()
+    axs = fig.add_subplot(111) 
+
+    if c == None:
+        xdata = np.linspace(0, dt*corr.shape[0], corr.shape[0])
+        axs.plot(xdata, corr)
+        p = list(coeffs[:-1]) + list(tconst)
+        axs.plot(xdata, _n_exp(xdata, *p), label=r"$\tau$={:.2e} ps, S2={:.2f}".format(tconst[0], 1-coeffs[0]))
+    else:
+        xdata = np.linspace(0, dt*corr.shape[1], corr.shape[1])
+        axs.plot(xdata, corr[c,:])
+        p = list(coeffs[c,:-1]) + list(tconst[c,:])
+        axs.plot(xdata, _n_exp(xdata, *p), label=r"c={}, $\tau$={:.2e} ps, S2={:.2f}".format(c, tconst[c,0], 1-coeffs[c,0]))
+
+    axs.legend()
+    #plt.show()
+    plt.savefig("plots/corr_{:03d}.png".format(c), dpi=300)
+    #plt.savefig("plots/corr.png", dpi=300)
+    plt.close()
+
+
+# ============================================================================ #
+
+
+def compute_S2(trajectory=None, filenames=None, verbose=True, parallel=True, fit=True):
     """
     Compute S2 order parameters from an MDTRAJ trajectory
     Input:
@@ -140,7 +338,8 @@ def compute_S2(trajectory=None, filenames=None, verbose=True, parallel=True):
         trajectory = mdtraj.load(filenames["trj"], top=filenames["top"])
 
     # superpose trajectory on first frame based on C alhpa atoms
-    _fit_trajectory(trajectory, fitframe=0)
+    if fit:
+        _fit_trajectory(trajectory, fitframe=0)
 
     # compute NH bond vectors
     NHvec, NHbondlength, NHresids, NHresnames = _get_NH_bond_vectors(trajectory)
@@ -155,7 +354,7 @@ def compute_S2(trajectory=None, filenames=None, verbose=True, parallel=True):
     return S2, convergence, NHinfo, corr
 
 
-
+# ============================================================================ #
 
 
 def compute_S2_batch(trajectorylist=None, filenamelist=None, only_converged=True, verbose=True):
@@ -218,6 +417,9 @@ def compute_S2_batch(trajectorylist=None, filenamelist=None, only_converged=True
     S2std = S2array.std(1)
 
     return S2mean, S2std, nconverged, NHinfo, NHcorr
+
+
+# ============================================================================ #
 
 
 def compute_S2_batch_mpi(trajectorylist=None, filenamelist=None, only_converged=True):
