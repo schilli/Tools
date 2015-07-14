@@ -73,7 +73,7 @@ my $jubioOffset = 36;
 my $freeCoresThreshold = 0.1;
 
 # default hostnames
-my @defaultHostnames = (1..32);
+my @defaultHostnames = (1..20);
 foreach my $n (@defaultHostnames) { $n = &hostname_from_index($n); }
 
 # Loglevels
@@ -140,7 +140,7 @@ if ($cmd ne "") {
     &distribute_procs_over_nodes();
 }
 
-&check_mpd_ring();
+#&check_mpd_ring();
 
 my $endtime = time();
 
@@ -219,6 +219,9 @@ sub hostname_to_alias {
     if (/iff560c(\d{2})/) {
         return sprintf("jubio%02d", ($1 - $jubioOffset));
 
+    }
+    elsif (/jubio(\d{2})/) {
+        return $_;
     } else {
         die "Bad hostname: $_";
     }
@@ -231,7 +234,9 @@ sub alias_to_hostname {
     $_ = $_[0];
 
     if (/jubio(\d{2})/) {
-        return "iff560c" . ($1 + $jubioOffset);
+        #return "iff560c" . ($1 + $jubioOffset);
+        # It seems that now aliases have become hostnames
+        return $_; 
 
     } else {
         die "Bad alias: $_";
@@ -605,5 +610,5 @@ sub check_mpd_ring {
 
 sub set_up_mpd_ring {
 
-    if ($mpdboot[0] =~ /(iff560c\d.{2}).*Connection refused/) { die "ERROR: Connection refused to host $i. Maybe already an mpd ring running there?"; }
+    #if ($mpdboot[0] =~ /(iff560c\d.{2}).*Connection refused/) { die "ERROR: Connection refused to host $i. Maybe already an mpd ring running there?"; }
 }
