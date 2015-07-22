@@ -264,12 +264,13 @@ def save_corr(savefilename, corr, corrstd, corrstdmean, bondvecinfo, topfilename
 
     savefilepath      = os.path.dirname(savefilename)
     npzfilename       = "corr.npz"
-    infofilename    = "info.dat"
+    infofilename      = "info.dat"
 
     info = {}
     info['npzfilename'] = npzfilename
     info['bondvecinfo'] = bondvecinfo
     info['trjfilename'] = trjfilename
+    info['topfilename'] = topfilename
     info['frames']      = frames
  
     # save arrays
@@ -279,16 +280,16 @@ def save_corr(savefilename, corr, corrstd, corrstdmean, bondvecinfo, topfilename
 
     # save info
     with open(infofilename, 'w') as outfile:
-        outfile.write(bz.compress(pickle.dumps(info, outfile)))
+        outfile.write(bz2.compress(pickle.dumps(info)))
 
     # pack both into zipfile
     with zipfile.ZipFile(savefilename, 'w') as outfile:
-        outfile.write(picklefilename)
-        outfile.write(   npzfilename)
+        outfile.write(infofilename)
+        outfile.write( npzfilename)
 
     # remove npz and pickle files
-    os.remove(picklefilename)
-    os.remove(   npzfilename)
+    os.remove(infofilename)
+    os.remove( npzfilename)
 
 
 # ============================================================================ #
@@ -328,7 +329,7 @@ def load_corr(filename):
         with open(zipfilename, 'r') as infile:
             # load info dictionary
             if zipfilename.find('.dat') >= 0:
-                info = pickle.loads(bz2.uncompress(infile.read(infile)))
+                info = pickle.loads(bz2.decompress(infile.read()))
 
             # load corr arrays
             if zipfilename.find('.npz') >= 0:
@@ -491,6 +492,8 @@ def bondvec_corr_batch_mpi(topfilename, trjfilenames, savepath, subtrjlength=Non
  
         loadstarttime = time.time()
         for ntrj, trj in enumerate(mdtraj.iterload(trjfilename, top=task['topfilename'], chunk=chunksize)):
+            if ntrj > 3:
+                break
             tc['loadtimer'] += time.time() - loadstarttime
             tc['nsubtrjs' ] += 1
 
