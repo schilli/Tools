@@ -486,12 +486,12 @@ def bondvec_corr_batch_mpi(topfilename, trjfilenames, savepath, subtrjlength=Non
                 saveinfo['zipfilename'] = savepath + '/' + ''.join(os.path.basename(trjfilename).split('.')[:-1]) + '_{}.zip'.format(fit)
             
                 bondvec_corr(trj, bondvec=bondvec, fitgroup=fitgroup, parallel=False, saveinfo=saveinfo, verbose=True)
-                print saveinfo
+                print(saveinfo)
 
-            if myrank == root:
-                print("\rProgress rank 0: {:3.0f}%".format(100.0*nf/len(filenames)), end="")
-
-    print("")
+#            if myrank == root:
+#                print("\rProgress rank 0: {:3.0f}%".format(100.0*nf/len(filenames)), end="")
+#
+#    print("")
         
 
 
