@@ -6,7 +6,7 @@ import sys, os, time
 import mdtraj
 import numpy as np
 import cPickle as pickle
-import zipfile
+import zipfile, bz2
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
 from mpi4py import MPI
@@ -264,7 +264,7 @@ def save_corr(savefilename, corr, corrstd, corrstdmean, bondvecinfo, topfilename
 
     savefilepath      = os.path.dirname(savefilename)
     npzfilename       = "corr.npz"
-    picklefilename    = "info.pickle"
+    infofilename    = "info.dat"
 
     info = {}
     info['npzfilename'] = npzfilename
@@ -278,8 +278,8 @@ def save_corr(savefilename, corr, corrstd, corrstdmean, bondvecinfo, topfilename
         np.savez_compressed(outfile, corr=corr, corrstd=corrstd, corrstdmean=corrstdmean)
 
     # save info
-    with open(picklefilename, 'w') as outfile:
-        pickle.dump(info, outfile)
+    with open(infofilename, 'w') as outfile:
+        outfile.write(bz.compress(pickle.dumps(info, outfile)))
 
     # pack both into zipfile
     with zipfile.ZipFile(savefilename, 'w') as outfile:
@@ -321,13 +321,14 @@ def load_corr(filename):
     # extract files
     with zipfile.ZipFile(filename, 'r') as infile:
         zipfilenames = infile.namelist()
-        infile.extractall()
+        for zipfilename in zipfilenames:
+            infile.extract(zipfilename)
 
     for zipfilename in zipfilenames:
         with open(zipfilename, 'r') as infile:
             # load info dictionary
-            if zipfilename.find('.pickle') >= 0:
-                info = pickle.load(infile)
+            if zipfilename.find('.dat') >= 0:
+                info = pickle.loads(bz2.uncompress(infile.read(infile)))
 
             # load corr arrays
             if zipfilename.find('.npz') >= 0:
