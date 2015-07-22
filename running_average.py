@@ -161,6 +161,80 @@ def get_window(width, win="const"):
 # ============================================================================ #
 
 
+def running_std(data, width, win="const", boundary="asymmetric"):
+    """compute running standar deviation of data
+    Data is a list of values of which to compute the
+    running standard deviation. The window function to be used 
+    and its half width can be specified. The result
+    is returned as a numpy array.
+    Options are:  const
+                  linear
+                  gaussain
+    The boundary can be treated in two ways:
+        either the window shrinks or it gets asymmetric
+                shrink
+                asymmetric""" 
+
+    L = len(data)
+    average = np.zeros(L, dtype=float)
+
+    # loop through data
+    for pos1 in range(L):
+
+        if boundary == "shrink":
+            # get upper and lower indices for window
+            lower = pos1 - width
+            upper = pos1 + width
+            window = get_window(width, win)
+
+            if (lower < 0):
+                lower = 0
+                upper = 2*pos1
+                window = get_window(pos1, win)
+            if (upper >= L):
+                lower = pos1-(L-pos1-1)
+                upper = L-1
+                window = get_window(L-pos1-1, win)
+
+            # loop through window
+            for i, pos2 in enumerate(range(lower, upper+1)):
+                average[pos1] += data[pos2] * window[i]
+
+
+        elif boundary == "asymmetric":
+            # get upper and lower indices for window
+            lower = pos1 - width
+            upper = pos1 + width
+            window = get_window(width, win)
+
+            if (lower < 0) and (upper >= L):
+                window = window[-lower:L-upper-1]
+                lower  = 0
+                upper  = L-1
+            elif (lower < 0):
+                window = window[-lower:]
+                lower  = 0
+            elif (upper >= L):
+                window = window[:L-upper-1]
+                upper  = L-1
+
+            # renormalize window
+            window /= sum(window)
+
+            # loop through window
+            for i, pos2 in enumerate(range(lower, upper+1)):
+                average[pos1] += data[pos2] * window[i] 
+
+        else:
+            print "ERROR: boundary treatment unknown: {}".format(boundary)
+            sys.exit(1)
+
+    return average 
+
+
+# ============================================================================ #
+
+
 def running_average(data, width, win="const", boundary="asymmetric"):
     """compute running average of data
     Data is a list of values of which to compute the
