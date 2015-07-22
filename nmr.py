@@ -2,7 +2,7 @@
 
 from __future__ import print_function
 
-import sys, os
+import sys, os, time
 import mdtraj
 import numpy as np
 import cPickle as pickle
@@ -229,7 +229,7 @@ def _angular_correlation_function(bondvec, verbose=True):
 # ============================================================================ #
 
 
-def save_corr(savefilename, corr, corrstd, corrstdmean, bondvecinfo, trjfilename, frames):
+def save_corr(savefilename, corr, corrstd, corrstdmean, bondvecinfo, topfilename, trjfilename, frames):
     """
     Save correlation functions to disk including all additional information.
 
@@ -252,6 +252,10 @@ def save_corr(savefilename, corr, corrstd, corrstdmean, bondvecinfo, trjfilename
 
     trjfilename : string
         Filename of the trajectory the original MD data was taken from.
+        Stored as is, so better provide a complete path.
+
+    topfilename : string
+        Filename of the topology the original MD data was taken from.
         Stored as is, so better provide a complete path.
 
     frames : (startframe, endframe) tuple
@@ -310,15 +314,8 @@ def load_corr(filename):
     corrstdmean : (nvec, nframes) array
         Angular correlation function standard error of the mean
 
-    bondvecinfo : dict
-        Dictionary with information on bondlength, resids and resnames
-
-    trjfilename : string
-        Filename of the trajectory the original MD data was taken from.
-        Stored as is, so better provide a complete path.
-
-    frames : (startframe, endframe) tuple
-        Range of frames used for correlation function computation
+    info
+        Dictionary with information on the loaded correlation functions
     """
 
     # extract files
@@ -342,7 +339,7 @@ def load_corr(filename):
         # remove extracted files
         os.remove(zipfilename)
 
-    return corr, corrstd, corrstdmean, info['bondvecinfo'], info['trjfilename'], info['frames']
+    return corr, corrstd, corrstdmean, info
 
 
 # ============================================================================ #
@@ -372,6 +369,7 @@ def bondvec_corr(trj, bondvec=None, fitgroup=None, parallel=True, saveinfo=None,
     saveinfo : dict, optional
         Information needed to save the correlation functions.
         Required keys are:
+            'topfilename'   the topology   file the data comes from
             'trjfilename'   the trajectory file the data comes from
             'frames'        tuple with initial and final frame
             'zipfilename'   name of the zipfile to store correlation functions in
@@ -393,9 +391,9 @@ def bondvec_corr(trj, bondvec=None, fitgroup=None, parallel=True, saveinfo=None,
     if type(fitgroup) != type(None):
         _fit_trj(trj, fitgroup=fitgroup, parallel=parallel)
 
-    bondvec_ndx   = _vec_atoms(trj, bondvec)
-    bondvectors, bondvecinfo = _bond_vec(trj, bondvec_ndx)
-    corr, corr_std, corr_stdmean = _angular_correlation_function(bondvectors, verbose=verbose)
+    bondvec_ndx                = _vec_atoms(trj, bondvec)
+    bondvectors, bondvecinfo   = _bond_vec(trj, bondvec_ndx)
+    corr, corrstd, corrstdmean = _angular_correlation_function(bondvectors, verbose=verbose)
 
     # store additional bond vector information
     if type(fitgroup) != type(None):
@@ -404,7 +402,7 @@ def bondvec_corr(trj, bondvec=None, fitgroup=None, parallel=True, saveinfo=None,
     bondvecinfo['bondvec' ] = bondvec
 
     if type(saveinfo) == type(dict()):
-        save_corr(saveinfo['zipfilename'], corr, corrstd, corrstdmean, bondvecinfo, saveinfo['trjfilename'], saveinfo['frames'])
+        save_corr(saveinfo['zipfilename'], corr, corrstd, corrstdmean, bondvecinfo, saveinfo['topfilename'], saveinfo['trjfilename'], saveinfo['frames'])
 
     return corr, bondvecinfo
 
@@ -442,10 +440,18 @@ def bondvec_corr_batch_mpi(topfilename, trjfilenames, savepath, subtrjlength=Non
         If not specified no fitting is done.
     """
 
+    # set up MPI
     comm   = MPI.COMM_WORLD
     nranks = comm.Get_size()
     myrank = comm.Get_rank()
     root   = 0
+
+    # set up some timer and counter
+    tc = {}
+    tc['loadtimer'] = 0.0
+    tc['corrtimer'] = 0.0
+    tc['nsubtrjs' ] = 0
+    tc['nframes'  ] = 0
 
     # to fit or not to fit?
     fit = "nofit"
@@ -468,7 +474,6 @@ def bondvec_corr_batch_mpi(topfilename, trjfilenames, savepath, subtrjlength=Non
             comm.send(task, dest=rank, tag=rank)
 
     task = comm.recv(source=root, tag=myrank)
-    #print("rank {} doing tasks ".format(myrank), task)
 
     # do the assigned piece of work
     for nf, trjfilename in enumerate(trjfilenames):
@@ -477,21 +482,60 @@ def bondvec_corr_batch_mpi(topfilename, trjfilenames, savepath, subtrjlength=Non
         trj       = trjs.next()
         dt        = trj.timestep
         chunksize = int(subtrjlength / dt)
+        trjindex  = task['trjindices'][nf]
 
-        for ntrj, trj in enumerate(mdtraj.iterload(trjilename, top=task['topfilename'], chunk=chunksize)):
+        if myrank == root:
+            print("\rProgress rank root: {:3.0f}% ".format(100.0*nf/len(trjfilenames), nf), end="")
+            sys.stdout.flush()
+ 
+        loadstarttime = time.time()
+        for ntrj, trj in enumerate(mdtraj.iterload(trjfilename, top=task['topfilename'], chunk=chunksize)):
+            tc['loadtimer'] += time.time() - loadstarttime
+            tc['nsubtrjs' ] += 1
+
             if trj.n_frames == chunksize:
+                tc['nframes'] += trj.n_frames
+
                 saveinfo = {}
-                saveinfo['trjfilename'] = task['trjfilename']
+                saveinfo['topfilename'] = task['topfilename']
+                saveinfo['trjfilename'] = trjfilename
                 saveinfo['frames'     ] = (ntrj * chunksize, (ntrj+1)*chunksize-1)
                 saveinfo['zipfilename'] = savepath + '/' + ''.join(os.path.basename(trjfilename).split('.')[:-1]) + '_{}.zip'.format(fit)
+                saveinfo['zipfilename'] = "{}/{}_no{}_frames{}to{}_{}.zip".format(savepath,
+                                                                                  ''.join(os.path.basename(trjfilename).split('.')[:-1]),
+                                                                                  trjindex,
+                                                                                  saveinfo['frames'][0],
+                                                                                  saveinfo['frames'][1],
+                                                                                  fit)
             
-                bondvec_corr(trj, bondvec=bondvec, fitgroup=fitgroup, parallel=False, saveinfo=saveinfo, verbose=True)
-                print(saveinfo)
+                corrstarttime = time.time()
+                bondvec_corr(trj, bondvec=bondvec, fitgroup=fitgroup, parallel=False, saveinfo=saveinfo, verbose=False)
+                tc['corrtimer'] += time.time() - corrstarttime
+            loadstarttime = time.time()
 
-#            if myrank == root:
-#                print("\rProgress rank 0: {:3.0f}%".format(100.0*nf/len(filenames)), end="")
-#
-#    print("")
+            if myrank == root:
+                print(".", end="")
+                sys.stdout.flush()
+
+    print("")
+
+
+    # report timers and counters to root
+    if myrank == root:
+        for rank in range(1, nranks):
+            tci = comm.recv(source=rank, tag=rank)
+            tc['loadtimer'] += tci['loadtimer'] 
+            tc['corrtimer'] += tci['corrtimer'] 
+            tc['nsubtrjs' ] += tci['nsubtrjs' ] 
+            tc['nframes'  ] += tci['nframes'  ] 
+    else:
+        comm.send(tc, dest=root, tag=myrank)
+
+    print("\nSummary")
+    print("-------\n")
+    print("Loaded {} subtrajectories with a total of {} frames".format(tc['nsubtrjs'], tc['nframes']))
+    print("Time for loading:          {:.0f}sec.".format(tc['loadtimer']))
+    print("Time for corr computation: {:.0f}sec.".format(tc['corrtimer']))
         
 
 
