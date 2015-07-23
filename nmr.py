@@ -1,8 +1,9 @@
+# -*- coding: UTF-8 -*-
 # Compute NMR observables from MD trajectories
 
 from __future__ import print_function
 
-import sys, os, time
+import sys, os, time, string
 import mdtraj
 import numpy as np
 import cPickle as pickle
@@ -14,6 +15,289 @@ from mpi4py import MPI
 
 # ============================================================================ #
 
+
+class corrFunction(object):
+    """
+    correlation function data, additional information and manipulation methods
+
+    Parameters
+    ----------
+    corr : (nvec, nframes) array
+        Correlation functions
+
+    std : (nvec, nframes) array
+        Correlation function standard deviations
+
+    error : (nvec, nframes) array
+        Correlation function standard error of the mean
+
+    info : dict
+        Dictionary with information on correlation functions
+    """
+
+    def __init__(self, corr=None, std=None, error=None, info=None):
+        self.corr        = corr
+        self.std         = std
+        self.error       = error
+        self.resid       = info['bondvecinfo']['resid'     ]
+        self.resindex    = info['bondvecinfo']['resindex'  ]
+        self.resnames    = info['bondvecinfo']['resnames'  ]
+        self.atomindex   = info['bondvecinfo']['atomindex' ]
+        self.atomnames   = info['bondvecinfo']['atomnames' ]
+        self.element     = info['bondvecinfo']['element'   ]
+        self.chain       = info['bondvecinfo']['chain'     ]
+        self.bondlength  = info['bondvecinfo']['bondlength']
+        self.bondvec     = info['bondvecinfo']['bondvec'   ]
+        self.fitgroup    = info['bondvecinfo']['fitgroup'  ]
+        self.fit         = info['bondvecinfo']['fit'       ]
+        self.dt          = info['bondvecinfo']['dt'        ]
+        self.topfilename = info['topfilename']
+        self.npzfilename = info['npzfilename']
+        self.trjfilename = info['trjfilename'] 
+        self.frames      = info['frames'     ]
+
+
+# ============================================================================ #
+
+
+class orderParameter(object):
+    """
+    Bond vector order parameters.
+
+    Parameters
+    ----------
+    corrfilenames : list
+        List with *.zip filenames containing correlation functions.
+
+    converged : boolean, optional, default: True
+        Use only converged correlation functions for averaging
+
+    verbose : boolean, optional
+        Report progress and other verbose output.
+
+    **kwargs : optional keyword arguments
+        All remaining keyword arguments are passed to the order parameter method.
+    """
+
+# ==================================== #
+
+    def __init__(self, corrfilenames=None, converged=True, verbose=True, **kwargs):
+        self.corrfilenames
+        self.converged     = converged
+        self.verbose       = verbose
+
+        self.corrlist      = []
+
+        self.method_kwargs = kwargs
+
+
+        # for plotting
+        self.figure  = None
+        self.axs     = None
+        self.cids    = None # connection ids for plot event handlers
+        self.lines   = []   # line object handels
+        self.corrset = 0    # which set of correlation functions from the corrlist should be plottet
+        self.corridx = 0    # which correlatin function to plot next
+        self.leftButtonPressed = False
+ 
+# ==================================== #
+
+    def load(self, corrfilenames=None):
+        """
+        Load sets of correlation functions.
+
+        Parameters
+        ----------
+        corrfilenames : list
+            List with *.zip filenames containing correlation functions.
+ 
+        """
+
+        if corrfilenames is not None:
+            self.corrfilenames = corrfilenames
+
+        starttime = time.time()
+
+        # load correlation functions
+        self.corrlist = []
+        print("Loading {} set{} of correlation functions:".format(len(self.corrfilenames), *['s' if i>1 else '' for i in [len(self.corrfilenames)]]))
+        for nf, filename in enumerate(self.corrfilenames):
+            corr, corrstd, corrstdmean, info = load_corr(filename)
+            self.corrlist.append(corrFunction(corr, corrstd, corrstdmean, info))
+            if self.verbose:
+                print("\rProgress: {:3.0f}%".format(100.0*nf/len(self.corrfilenames)), end="")
+                sys.stdout.flush()
+
+        # report runtime
+        if self.verbose:
+            print("\rLoading took: {:.2f} sec.".format(time.time() - starttime))
+
+# ==================================== #
+
+    def estimate(self, method="mean", converged=True, **kwargs):
+        """
+        Estimate bond vector order parameters from correlation functions.
+
+        Parameters
+        ----------
+        method: string, optional
+            The method to use for order parameter computation.
+            Options are:
+                "mean"          Use the mean of the final quarter as order parameter
+                "single exp"    Fit correlation functions to single exponential
+                "double exp"    Fit correlation functions to double exponential
+                "extLS"         Use the extended least squares method (method 3) from:
+                                JPCB 2008, 112, 6155-6158, pubs.acs.org/doi/abs/10.1021/jp077018h
+                "iRED"          Use the iRED method from:
+                                Brüschweiler, JACS 2002, 124, 4522-4534, pubs.acs.org/doi/abs/10.1021/ja012750u
+
+        converged : boolean, optional, default: True
+            Use only converged correlation functions for averaging
+        """
+ 
+        self.method    = method
+        self.converged = converged
+
+        # select order parameter estimation method
+        if self.method == "mean":
+            self.estimate_mean(self.corrlist, kwargs)
+        else:
+            print("Order parameter estimation method unknown: {}".format(self.method))
+            sys.exit(1)
+ 
+# ==================================== #
+
+    def estimate_mean(self, converged=True, diffThreshold=0.02, stdThreshold=0.02):
+        """
+        Estimate bond vector order parameters as the mean of the last quarter of the correlation function.
+
+        Parameters
+        ----------
+        converged : boolean, optional
+            If True, only use converged correlation functions.
+        diffThreshold : float, optional
+            If the quarters 3 and 4 of the correlation function differ more than this threshold,
+            they are not considered converged
+        stdThreshold : float, optional
+            If the mean standard deviation of quarter 3 and 4 is larger than this threshold,
+            they are not considered converged.
+        """
+
+        for corrfun in self.corrlist:
+            length = corrfun.corr.shape[1]
+
+#        length            = corr.shape[1]
+#        quarter           = length/4
+#        thirdQuarter      = corr[:,2*quarter:3*quarter]
+#        fourthQuarter     = corr[:,3*quarter:4*quarter]
+#        fourthQuarterMean = fourthQuarter.mean(1)
+#
+#        difference        = abs(thirdQuarter.mean(1) - fourthQuarterMean)
+#        stdev             = (thirdQuarter.std(1) + fourthQuarter.std(1)) / 2
+#        convergence       = np.logical_and(difference < diffThreshold, stdev < stdThreshold)
+#
+#        return fourthQuarterMean, convergence 
+ 
+
+# ==================================== #
+
+    def plot_corr(self, event=None, corrset=0):
+        """
+        Plot correlation functions.
+        
+        Parameters
+        ----------
+        event : matplotlib mouse event
+            Only there to update the plot on various matplotlib events, like mouse button presses
+        corrset: integer, optional
+            Which set of correlation functions to use for plotting
+        """
+
+        if self.figure is None:
+            # create figure and axis
+            self.figure = plt.figure()
+            self.axs    = self.figure.add_subplot(111)  
+            self.cids['button_press'  ] = self.fig.canvas.mpl_connect('button_press_event',   self._onclick)
+            self.cids['button_release'] = self.fig.canvas.mpl_connect('button_release_event', self._onrelease)
+            self.cids['motion'        ] = self.fig.canvas.mpl_connect('motion_notify_event',  self._onmove)
+            self.cids['scroll'        ] = self.fig.canvas.mpl_connect('scroll_event',         self._onscroll)
+            self.cids['close'         ] = self.fig.canvas.mpl_connect('close_event',          self._onclose)
+
+            self.corrset = corrset
+            self.corridx = 0
+            self.lines   = []
+
+
+#        self.corr        = corr
+#        self.std         = std
+#        self.error       = error
+#        self.resid       = info['bondvecinfo']['resid'     ]
+#        self.resindex    = info['bondvecinfo']['resindex'  ]
+#        self.resnames    = info['bondvecinfo']['resnames'  ]
+#        self.atomindex   = info['bondvecinfo']['atomindex' ]
+#        self.atomnames   = info['bondvecinfo']['atomnames' ]
+#        self.element     = info['bondvecinfo']['element'   ]
+#        self.chain       = info['bondvecinfo']['chain'     ]
+#        self.bondlength  = info['bondvecinfo']['bondlength']
+#        self.bondvec     = info['bondvecinfo']['bondvec'   ]
+#        self.fitgroup    = info['bondvecinfo']['fitgroup'  ]
+#        self.fit         = info['bondvecinfo']['fit'       ]
+#        self.dt          = info['bondvecinfo']['dt'        ]
+#        self.topfilename = info['topfilename']
+#        self.npzfilename = info['npzfilename']
+#        self.trjfilename = info['trjfilename'] 
+#        self.frames      = info['frames'     ]
+ 
+
+        # remove old data
+        while len(self.lines) > 0:
+            line = self.lines.pop()
+            line.remove() 
+
+        # plot data
+        corrFun     = self.corrlist[self.corrset]
+        xdata       = np.linspace(0, corrFun.corr.shape[1] * corrFun.dt, corrFun.corr.shape[1])
+        self.lines += self.axs.plot(self.xdata, corrFun.corr[self.corridx,:], 'b')
+
+        # set axis limits
+        self.axs.set_ylim(min(0, corrFun.corr.min()), max(1, corrFun.corr.max()))
+
+        # annotate plot
+        self.axs.set_title("{} {}".format(corrFun.resnames[self.corridx], corrFun.resids[self.corridx]))
+        self.axs.set_ylabel("correlation")
+        self.axs.set_xlabel("time [ps]")
+        self.legend(loc="lower left")
+
+        self.fig.canvas.draw()
+        plt.show()
+ 
+# ==================================== #
+
+    def _onclick(self, event):
+        if event.button == 1:
+            self.leftButtonPressed = True
+            try:
+                xmin, xmax = self.axs.get_xlim()
+                ncorr = self.corrlist[self.corrset].corr.shape[0]
+                self.corridx = int(np.round((ncorr-1) * (event.xdata - xmin) / (xmax - xmin)))
+                if self.corridx < 0:
+                    self.corridx = 0
+                elif self.corridx >= ncorr:
+                    self.corridx = ncorr - 1
+                self.plot()
+            except:
+                pass 
+
+# ==================================== #
+    
+    def _onclose(self, event):
+        self.figure  = None
+        self.axs     = None
+        self.cids    = {}
+        self.lines   = []
+
+# ============================================================================ #
+ 
 
 def _fit_trj(trj, fitframe=0, ref=None, fitgroup="name CA", parallel=True):
     """
@@ -262,9 +546,15 @@ def save_corr(savefilename, corr, corrstd, corrstdmean, bondvecinfo, topfilename
         Range of frames used for correlation function computation
     """
 
+    tmpdirnamelen     = 8
+    tmpdirname        = "tmpdir_" + ''.join(np.random.choice([i for i in string.letters + string.digits], size=tmpdirnamelen))
+    os.mkdir(tmpdirname)
     savefilepath      = os.path.dirname(savefilename)
     npzfilename       = "corr.npz"
     infofilename      = "info.dat"
+
+    if not os.path.isdir(savefilepath):
+        os.mkdir(savefilepath)
 
     info = {}
     info['npzfilename'] = npzfilename
@@ -274,22 +564,23 @@ def save_corr(savefilename, corr, corrstd, corrstdmean, bondvecinfo, topfilename
     info['frames']      = frames
  
     # save arrays
-    with open(npzfilename, 'w') as outfile:
+    with open(tmpdirname + '/' + npzfilename, 'w') as outfile:
         #np.savez(outfile, corr, corrstd, corrstdmean)
         np.savez_compressed(outfile, corr=corr, corrstd=corrstd, corrstdmean=corrstdmean)
 
     # save info
-    with open(infofilename, 'w') as outfile:
+    with open(tmpdirname + '/' + infofilename, 'w') as outfile:
         outfile.write(bz2.compress(pickle.dumps(info)))
 
     # pack both into zipfile
     with zipfile.ZipFile(savefilename, 'w') as outfile:
-        outfile.write(infofilename)
-        outfile.write( npzfilename)
+        outfile.write(tmpdirname + '/' + infofilename, arcname=infofilename)
+        outfile.write(tmpdirname + '/' +  npzfilename, arcname=npzfilename )
 
     # remove npz and pickle files
-    os.remove(infofilename)
-    os.remove( npzfilename)
+    os.remove(tmpdirname + '/' + infofilename)
+    os.remove(tmpdirname + '/' +  npzfilename)
+    os.rmdir (tmpdirname)
 
 
 # ============================================================================ #
@@ -442,18 +733,20 @@ def bondvec_corr_batch_mpi(topfilename, trjfilenames, savepath, subtrjlength=Non
         If not specified no fitting is done.
     """
 
+    # set up some timer and counter
+    tc = {}
+    tc['runtimer']  = time.time()
+    tc['loadtimer'] = 0.0
+    tc['corrtimer'] = 0.0
+    tc['nsubtrjs' ] = 0
+    tc['nframes'  ] = 0
+ 
+
     # set up MPI
     comm   = MPI.COMM_WORLD
     nranks = comm.Get_size()
     myrank = comm.Get_rank()
     root   = 0
-
-    # set up some timer and counter
-    tc = {}
-    tc['loadtimer'] = 0.0
-    tc['corrtimer'] = 0.0
-    tc['nsubtrjs' ] = 0
-    tc['nframes'  ] = 0
 
     # to fit or not to fit?
     fit = "nofit"
@@ -470,15 +763,18 @@ def bondvec_corr_batch_mpi(topfilename, trjfilenames, savepath, subtrjlength=Non
             taskstaken = sum(ntasksperrank[:rank])
             task = {}
             task['topfilename']  = topfilename
-            task['trjfilenames'] = trjfilenames[taskstaken:taskstaken+ntasksperrank[rank]]
-            task['trjindices']   = range(taskstaken, taskstaken+ntasksperrank[rank])
+            task['trjindices']   = range(rank, len(trjfilenames), nranks)
+            task['trjfilenames'] = [trjfilenames[i] for i in task['trjindices']]
             task['savepath']     = savepath
+
             comm.send(task, dest=rank, tag=rank)
 
     task = comm.recv(source=root, tag=myrank)
+#    print ("rank {}: ".format(myrank), task['trjindices'], task['trjfilenames'])
+#    sys.exit(0)
 
     # do the assigned piece of work
-    for nf, trjfilename in enumerate(trjfilenames):
+    for nf, trjfilename in enumerate(task['trjfilenames']):
         # determinde dt and chunksize
         trjs      = mdtraj.iterload(trjfilename, top=task['topfilename'], chunk=2)
         trj       = trjs.next()
@@ -487,13 +783,12 @@ def bondvec_corr_batch_mpi(topfilename, trjfilenames, savepath, subtrjlength=Non
         trjindex  = task['trjindices'][nf]
 
         if myrank == root:
-            print("\rProgress rank root: {:3.0f}% ".format(100.0*nf/len(trjfilenames), nf), end="")
+            print("\r", 100*" ", end="")
+            print("\rProgress rank root: {:3.0f}% ".format(100.0*nf/len(task['trjfilenames']), nf), end="")
             sys.stdout.flush()
  
         loadstarttime = time.time()
         for ntrj, trj in enumerate(mdtraj.iterload(trjfilename, top=task['topfilename'], chunk=chunksize)):
-            if ntrj > 3:
-                break
             tc['loadtimer'] += time.time() - loadstarttime
             tc['nsubtrjs' ] += 1
 
@@ -535,11 +830,128 @@ def bondvec_corr_batch_mpi(topfilename, trjfilenames, savepath, subtrjlength=Non
     else:
         comm.send(tc, dest=root, tag=myrank)
 
-    print("\nSummary")
-    print("-------\n")
-    print("Loaded {} subtrajectories with a total of {} frames".format(tc['nsubtrjs'], tc['nframes']))
-    print("Time for loading:          {:.0f}sec.".format(tc['loadtimer']))
-    print("Time for corr computation: {:.0f}sec.".format(tc['corrtimer']))
+    comm.barrier()
+
+    tc['runtimer'] = time.time() - tc['runtimer']
+    if myrank == root:
+        print("Summary")
+        print("-------\n")
+        print("Loaded {} subtrajectories with a total of {} frames".format(tc['nsubtrjs'], tc['nframes']))
+        print("Total runtime:                        {:8.0f} sec.".format(tc['runtimer' ]))
+        print("Aggregated time for loading:          {:8.0f} sec.".format(tc['loadtimer']))
+        print("Aggregated time for corr computation: {:8.0f} sec.".format(tc['corrtimer']))
         
 
+# ============================================================================ #
 
+
+def _check_corr_convergence(corr, diffThreshold=0.02, stdThreshold=0.02):
+    """
+    Check the convergence of the bond vector correlation functions
+
+    Parameters
+    ----------
+    corr : (nbonds, nframes) array
+        Correlation functions
+
+    diffThreshold: float, optional
+        Maximum mean difference for convergence check.
+
+    stdThreshold: float, optional
+        Maximum stdev difference for convergence check.
+
+    Returns
+    -------
+    
+
+        (convergence values, boolean array of converged correlation functions)
+    """
+    length            = corr.shape[1]
+    quarter           = length/4
+    thirdQuarter      = corr[:,2*quarter:3*quarter]
+    fourthQuarter     = corr[:,3*quarter:4*quarter]
+    fourthQuarterMean = fourthQuarter.mean(1)
+    difference        = abs(thirdQuarter.mean(1) - fourthQuarterMean)
+    stdev             = (thirdQuarter.std(1) + fourthQuarter.std(1)) / 2
+    convergence       = np.logical_and(difference < diffThreshold, stdev < stdThreshold)
+    return fourthQuarterMean, convergence
+ 
+
+
+# ============================================================================ #
+
+
+def order_parameter_mean(corr, converged=True, diffThreshold=0.02, stdThreshold=0.02):
+
+    length            = corr.shape[1]
+    quarter           = length/4
+    thirdQuarter      = corr[:,2*quarter:3*quarter]
+    fourthQuarter     = corr[:,3*quarter:4*quarter]
+    fourthQuarterMean = fourthQuarter.mean(1)
+
+    difference        = abs(thirdQuarter.mean(1) - fourthQuarterMean)
+    stdev             = (thirdQuarter.std(1) + fourthQuarter.std(1)) / 2
+    convergence       = np.logical_and(difference < diffThreshold, stdev < stdThreshold)
+
+    return fourthQuarterMean, convergence 
+
+
+# ============================================================================ #
+
+
+def order_parameter(corrfilenames, method="mean", converged=True, verbose=True, **kwargs):
+    """
+    Compute bond vector order parameters from correlation functions.
+
+    Parameters
+    ----------
+    corrfilenames : list
+        List with *.zip filenames containing correlation functions.
+        
+    method: string, optional
+        The method to use for order parameter computation.
+        Options are:
+            "mean"          Use the mean of the final quarter as order parameter
+            "single exp"    Fit correlation functions to single exponential
+            "double exp"    Fit correlation functions to double exponential
+            "extLS"         Use the extended least squares method (method 3) from:
+                            JPCB 2008, 112, 6155-6158, pubs.acs.org/doi/abs/10.1021/jp077018h
+            "iRED"          Use the iRED method from:
+                            Brüschweiler, JACS 2002, 124, 4522-4534, pubs.acs.org/doi/abs/10.1021/ja012750u
+
+    converged : boolean, optional, default: True
+        Use only converged correlation functions for averaging
+
+    verbose : boolean, optional
+        Report progress and other verbose output.
+
+    **kwargs : optional keyword arguments
+        All remaining keyword arguments are passed to the order parameter method.
+    """
+
+    starttime = time.time()
+
+    # load correlation functions
+    corrlist = []
+    print("Loading {} set{} of correlation functions:".format(len(corrfilenames), *['s' if i>1 else '' for i in [len(corrlist)]]))
+    for nf, filename in enumerate(corrfilenames):
+        corr, corrstd, corrstdmean, info = load_corr(filename)
+        corrlist.append(corrFunction(corr, corrstd, corrstdmean, info))
+        if verbose:
+            print("\rProgress: {:3.0f}%".format(100.0*nf/len(corrfilenames)), end="")
+            sys.stdout.flush()
+
+    # select order parameter estimation method
+    if method == "mean":
+        S2 = order_parameter_mean(corrlist, **kwargs)
+    else:
+        print("Order parameter estimation method unknown: {}".format(method))
+        sys.exit(1)
+
+    # report runtime
+    print("\rRuntime: {:.2f} sec.".format(time.time() - starttime))
+
+    return S2
+ 
+
+    
