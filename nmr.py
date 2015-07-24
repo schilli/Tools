@@ -41,9 +41,9 @@ class corrFunction(object):
         self.error       = error
         self.resid       = info['bondvecinfo']['resid'     ]
         self.resindex    = info['bondvecinfo']['resindex'  ]
-        self.resnames    = info['bondvecinfo']['resnames'  ]
+        self.resname     = info['bondvecinfo']['resnames'  ]
         self.atomindex   = info['bondvecinfo']['atomindex' ]
-        self.atomnames   = info['bondvecinfo']['atomnames' ]
+        self.atomname    = info['bondvecinfo']['atomnames' ]
         self.element     = info['bondvecinfo']['element'   ]
         self.chain       = info['bondvecinfo']['chain'     ]
         self.bondlength  = info['bondvecinfo']['bondlength']
@@ -60,7 +60,7 @@ class corrFunction(object):
 # ============================================================================ #
 
 
-class orderParameter(object):
+class OrderParameter(object):
     """
     Bond vector order parameters.
 
@@ -82,7 +82,7 @@ class orderParameter(object):
 # ==================================== #
 
     def __init__(self, corrfilenames=None, converged=True, verbose=True, **kwargs):
-        self.corrfilenames
+        self.corrfilenames = corrfilenames
         self.converged     = converged
         self.verbose       = verbose
 
@@ -94,11 +94,15 @@ class orderParameter(object):
         # for plotting
         self.figure  = None
         self.axs     = None
-        self.cids    = None # connection ids for plot event handlers
+        self.cids    = {}   # connection ids for plot event handlers
         self.lines   = []   # line object handels
         self.corrset = 0    # which set of correlation functions from the corrlist should be plottet
         self.corridx = 0    # which correlatin function to plot next
         self.leftButtonPressed = False
+
+        # load data
+        if self.corrfilenames is not None:
+            self.load()
  
 # ==================================== #
 
@@ -217,11 +221,11 @@ class orderParameter(object):
             # create figure and axis
             self.figure = plt.figure()
             self.axs    = self.figure.add_subplot(111)  
-            self.cids['button_press'  ] = self.fig.canvas.mpl_connect('button_press_event',   self._onclick)
-            self.cids['button_release'] = self.fig.canvas.mpl_connect('button_release_event', self._onrelease)
-            self.cids['motion'        ] = self.fig.canvas.mpl_connect('motion_notify_event',  self._onmove)
-            self.cids['scroll'        ] = self.fig.canvas.mpl_connect('scroll_event',         self._onscroll)
-            self.cids['close'         ] = self.fig.canvas.mpl_connect('close_event',          self._onclose)
+            self.cids['button_press'  ] = self.figure.canvas.mpl_connect('button_press_event',   self._onclick)
+            self.cids['button_release'] = self.figure.canvas.mpl_connect('button_release_event', self._onrelease)
+            self.cids['motion'        ] = self.figure.canvas.mpl_connect('motion_notify_event',  self._onmove)
+            self.cids['scroll'        ] = self.figure.canvas.mpl_connect('scroll_event',         self._onscroll)
+            self.cids['close'         ] = self.figure.canvas.mpl_connect('close_event',          self._onclose)
 
             self.corrset = corrset
             self.corridx = 0
@@ -233,9 +237,9 @@ class orderParameter(object):
 #        self.error       = error
 #        self.resid       = info['bondvecinfo']['resid'     ]
 #        self.resindex    = info['bondvecinfo']['resindex'  ]
-#        self.resnames    = info['bondvecinfo']['resnames'  ]
+#        self.resname     = info['bondvecinfo']['resnames'  ]
 #        self.atomindex   = info['bondvecinfo']['atomindex' ]
-#        self.atomnames   = info['bondvecinfo']['atomnames' ]
+#        self.atomname    = info['bondvecinfo']['atomnames' ]
 #        self.element     = info['bondvecinfo']['element'   ]
 #        self.chain       = info['bondvecinfo']['chain'     ]
 #        self.bondlength  = info['bondvecinfo']['bondlength']
@@ -257,18 +261,23 @@ class orderParameter(object):
         # plot data
         corrFun     = self.corrlist[self.corrset]
         xdata       = np.linspace(0, corrFun.corr.shape[1] * corrFun.dt, corrFun.corr.shape[1])
-        self.lines += self.axs.plot(self.xdata, corrFun.corr[self.corridx,:], 'b')
+        self.lines += self.axs.plot(xdata, corrFun.corr[self.corridx,:], 'b')
 
         # set axis limits
         self.axs.set_ylim(min(0, corrFun.corr.min()), max(1, corrFun.corr.max()))
 
+        # plot scrollbar
+        xmin, xmax = self.axs.get_xlim()
+        self.lines += self.axs.plot([xmin, xmax], 2*[0.98], 'k', linewidth=2)
+        self.lines += self.axs.plot(xmin + self.corridx*(xmax-xmin)/corrFun.corr.shape[0], 0.98, 'sk', markersize=15)
+
         # annotate plot
-        self.axs.set_title("{} {}".format(corrFun.resnames[self.corridx], corrFun.resids[self.corridx]))
+        self.axs.set_title("{} {}".format(corrFun.resname[0][self.corridx], corrFun.resid[0][self.corridx]))
         self.axs.set_ylabel("correlation")
         self.axs.set_xlabel("time [ps]")
-        self.legend(loc="lower left")
+        self.axs.legend(loc="lower left")
 
-        self.fig.canvas.draw()
+        self.figure.canvas.draw()
         plt.show()
  
 # ==================================== #
@@ -284,10 +293,44 @@ class orderParameter(object):
                     self.corridx = 0
                 elif self.corridx >= ncorr:
                     self.corridx = ncorr - 1
-                self.plot()
+                self.plot_corr()
             except:
                 pass 
 
+# ==================================== #
+
+    def _onrelease(self, event):
+        if event.button == 1:
+            self.leftButtonPressed = False 
+
+# ==================================== #
+
+    def _onmove(self, event):
+        if self.leftButtonPressed:
+            try:
+                xmin, xmax = self.axs.get_xlim()
+                ncorr = self.corrlist[self.corrset].corr.shape[0]
+                self.corridx = int(np.round((ncorr-1) * (event.xdata - xmin) / (xmax - xmin)))
+                if self.corridx < 0:
+                    self.corridx = 0
+                elif self.corridx >= ncorr:
+                    self.corridx = ncorr - 1 
+                self.plot_corr()
+            except:
+                pass 
+
+# ==================================== #
+
+    def _onscroll(self, event):
+        ncorr = self.corrlist[self.corrset].corr.shape[0]
+        self.corridx -= int(event.step)
+        if self.corridx < 0:
+            self.corridx = ncorr - 1
+        elif self.corridx >= ncorr:
+            self.corridx = 0
+
+        self.plot_corr()
+ 
 # ==================================== #
     
     def _onclose(self, event):
@@ -332,6 +375,7 @@ def _fit_trj(trj, fitframe=0, ref=None, fitgroup="name CA", parallel=True):
         fit_atomndx = fitgroup
 
     trj.superpose(ref, fitframe, atom_indices=fit_atomndx, parallel=parallel)
+    print(fit_atomndx)
  
 
 # ============================================================================ #
@@ -681,7 +725,7 @@ def bondvec_corr(trj, bondvec=None, fitgroup=None, parallel=True, saveinfo=None,
     """
 
     # fit trajectory
-    if type(fitgroup) != type(None):
+    if fitgroup is not None:
         _fit_trj(trj, fitgroup=fitgroup, parallel=parallel)
 
     bondvec_ndx                = _vec_atoms(trj, bondvec)
@@ -775,6 +819,8 @@ def bondvec_corr_batch_mpi(topfilename, trjfilenames, savepath, subtrjlength=Non
 
     # do the assigned piece of work
     for nf, trjfilename in enumerate(task['trjfilenames']):
+        if nf > 3:
+            break
         # determinde dt and chunksize
         trjs      = mdtraj.iterload(trjfilename, top=task['topfilename'], chunk=2)
         trj       = trjs.next()
@@ -789,6 +835,8 @@ def bondvec_corr_batch_mpi(topfilename, trjfilenames, savepath, subtrjlength=Non
  
         loadstarttime = time.time()
         for ntrj, trj in enumerate(mdtraj.iterload(trjfilename, top=task['topfilename'], chunk=chunksize)):
+            if ntrj > 3:
+                break
             tc['loadtimer'] += time.time() - loadstarttime
             tc['nsubtrjs' ] += 1
 
