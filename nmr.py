@@ -375,7 +375,6 @@ def _fit_trj(trj, fitframe=0, ref=None, fitgroup="name CA", parallel=True):
         fit_atomndx = fitgroup
 
     trj.superpose(ref, fitframe, atom_indices=fit_atomndx, parallel=parallel)
-    print(fit_atomndx)
  
 
 # ============================================================================ #
@@ -819,8 +818,8 @@ def bondvec_corr_batch_mpi(topfilename, trjfilenames, savepath, subtrjlength=Non
 
     # do the assigned piece of work
     for nf, trjfilename in enumerate(task['trjfilenames']):
-        if nf > 3:
-            break
+#        if nf > 3:
+#            break
         # determinde dt and chunksize
         trjs      = mdtraj.iterload(trjfilename, top=task['topfilename'], chunk=2)
         trj       = trjs.next()
@@ -835,8 +834,8 @@ def bondvec_corr_batch_mpi(topfilename, trjfilenames, savepath, subtrjlength=Non
  
         loadstarttime = time.time()
         for ntrj, trj in enumerate(mdtraj.iterload(trjfilename, top=task['topfilename'], chunk=chunksize)):
-            if ntrj > 3:
-                break
+#            if ntrj > 3:
+#                break
             tc['loadtimer'] += time.time() - loadstarttime
             tc['nsubtrjs' ] += 1
 
