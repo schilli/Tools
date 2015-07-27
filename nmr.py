@@ -39,22 +39,41 @@ class corrFunction(object):
         self.corr        = corr
         self.std         = std
         self.error       = error
-        self.resid       = info['bondvecinfo']['resid'     ]
-        self.resindex    = info['bondvecinfo']['resindex'  ]
-        self.resname     = info['bondvecinfo']['resnames'  ]
-        self.atomindex   = info['bondvecinfo']['atomindex' ]
-        self.atomname    = info['bondvecinfo']['atomnames' ]
-        self.element     = info['bondvecinfo']['element'   ]
-        self.chain       = info['bondvecinfo']['chain'     ]
-        self.bondlength  = info['bondvecinfo']['bondlength']
-        self.bondvec     = info['bondvecinfo']['bondvec'   ]
-        self.fitgroup    = info['bondvecinfo']['fitgroup'  ]
-        self.fit         = info['bondvecinfo']['fit'       ]
-        self.dt          = info['bondvecinfo']['dt'        ]
-        self.topfilename = info['topfilename']
-        self.npzfilename = info['npzfilename']
-        self.trjfilename = info['trjfilename'] 
-        self.frames      = info['frames'     ]
+
+        if info is not None:
+            self.resid       = info['bondvecinfo']['resid'     ]
+            self.resindex    = info['bondvecinfo']['resindex'  ]
+            self.resname     = info['bondvecinfo']['resnames'  ]
+            self.atomindex   = info['bondvecinfo']['atomindex' ]
+            self.atomname    = info['bondvecinfo']['atomnames' ]
+            self.element     = info['bondvecinfo']['element'   ]
+            self.chain       = info['bondvecinfo']['chain'     ]
+            self.bondlength  = info['bondvecinfo']['bondlength']
+            self.bondvec     = info['bondvecinfo']['bondvec'   ]
+            self.fitgroup    = info['bondvecinfo']['fitgroup'  ]
+            self.fit         = info['bondvecinfo']['fit'       ]
+            self.dt          = info['bondvecinfo']['dt'        ]
+            self.topfilename = info['topfilename']
+            self.npzfilename = info['npzfilename']
+            self.trjfilename = info['trjfilename'] 
+            self.frames      = info['frames'     ]
+        else:
+            self.resid       = None
+            self.resindex    = None
+            self.resname     = None
+            self.atomindex   = None
+            self.atomname    = None
+            self.element     = None
+            self.chain       = None
+            self.bondlength  = None
+            self.bondvec     = None
+            self.fitgroup    = None
+            self.fit         = None
+            self.dt          = None
+            self.topfilename = None
+            self.npzfilename = None
+            self.trjfilename = None
+            self.frames      = None
 
 
 # ============================================================================ #
@@ -135,6 +154,25 @@ class OrderParameter(object):
         # report runtime
         if self.verbose:
             print("\rLoading took: {:.2f} sec.".format(time.time() - starttime))
+
+# ==================================== #
+
+    def average_corr(self):
+        """
+        Compute the average correlation function and its standard deviation
+        """
+        nvec, nframes = self.corrlist[0].corr.shape
+        ncorr         = len(self.corrlist)
+        allcorr = np.zeros([ncorr, nvec, nframes], dtype=self.corrlist[0].corr.dtype)
+
+        for c, corr in enumerate(self.corrlist):
+            allcorr[c,:,:] = corr.corr
+
+        mean         = allcorr.mean(0)
+        std          = allcorr.std(0)
+        stderrormean = allcorr.std(0)/allcorr.shape[0]**0.5
+
+        return mean, std, stderrormean
 
 # ==================================== #
 
@@ -262,6 +300,8 @@ class OrderParameter(object):
         corrFun     = self.corrlist[self.corrset]
         xdata       = np.linspace(0, corrFun.corr.shape[1] * corrFun.dt, corrFun.corr.shape[1])
         self.lines += self.axs.plot(xdata, corrFun.corr[self.corridx,:], 'b')
+        corrmean, corrstd, corrstdmean = self.average_corr()
+        self.lines += fill_between(xdata, corrmean[self.corridx,:]+corrstd[self.corridx,:], corrmean[self.corridx,:]-corrstd[self.corridx,:], alpha=0.4, color='r')
 
         # set axis limits
         self.axs.set_ylim(min(0, corrFun.corr.min()), max(1, corrFun.corr.max()))
