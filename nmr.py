@@ -3,7 +3,7 @@
 
 from __future__ import print_function
 
-import sys, os, time, string
+import sys, os, time, string, copy
 import mdtraj
 import numpy as np
 import cPickle as pickle
@@ -51,7 +51,14 @@ class corrFunction(object):
             self.bondlength  = info['bondvecinfo']['bondlength']
             self.bondvec     = info['bondvecinfo']['bondvec'   ]
             self.fitgroup    = info['bondvecinfo']['fitgroup'  ]
-            self.fit         = info['bondvecinfo']['fit'       ]
+            try:
+                self.fit     = info['bondvecinfo']['fit'       ]
+            except KeyError:
+                self.fit     = False
+            try:
+                self.S2simple = info['bondvecinfo']['S2']
+            except KeyError:
+                self.S2simple = None
             self.dt          = info['bondvecinfo']['dt'        ]
             self.topfilename = info['topfilename']
             self.npzfilename = info['npzfilename']
@@ -109,6 +116,8 @@ class OrderParameter(object):
 
         self.method_kwargs = kwargs
 
+        # mean values
+        self.avgcorr = None
 
         # for plotting
         self.figure  = None
@@ -151,6 +160,9 @@ class OrderParameter(object):
                 print("\rProgress: {:3.0f}%".format(100.0*nf/len(self.corrfilenames)), end="")
                 sys.stdout.flush()
 
+        # compute mean
+        self.average_corr()
+
         # report runtime
         if self.verbose:
             print("\rLoading took: {:.2f} sec.".format(time.time() - starttime))
@@ -168,11 +180,23 @@ class OrderParameter(object):
         for c, corr in enumerate(self.corrlist):
             allcorr[c,:,:] = corr.corr
 
-        mean         = allcorr.mean(0)
-        std          = allcorr.std(0)
-        stderrormean = allcorr.std(0)/allcorr.shape[0]**0.5
-
-        return mean, std, stderrormean
+        self.avgcorr = corrFunction(corr=allcorr.mean(0), std=allcorr.std(0), error=allcorr.std(0)/allcorr.shape[0]**0.5)
+        self.avgcorr.resid       = copy.copy(self.corrlist[0].resid      )
+        self.avgcorr.resindex    = copy.copy(self.corrlist[0].resindex   )
+        self.avgcorr.resname     = copy.copy(self.corrlist[0].resname    )
+        self.avgcorr.atomindex   = copy.copy(self.corrlist[0].atomindex  )
+        self.avgcorr.atomname    = copy.copy(self.corrlist[0].atomname   )
+        self.avgcorr.element     = copy.copy(self.corrlist[0].element    )
+        self.avgcorr.chain       = copy.copy(self.corrlist[0].chain      )
+        self.avgcorr.bondlength  = copy.copy(self.corrlist[0].bondlength )
+        self.avgcorr.bondvec     = copy.copy(self.corrlist[0].bondvec    )
+        self.avgcorr.fitgroup    = copy.copy(self.corrlist[0].fitgroup   )
+        self.avgcorr.fit         = copy.copy(self.corrlist[0].fit        )
+        self.avgcorr.dt          = copy.copy(self.corrlist[0].dt         )
+        self.avgcorr.topfilename = copy.copy(self.corrlist[0].topfilename)
+        self.avgcorr.npzfilename = None
+        self.avgcorr.trjfilename = None
+        self.avgcorr.frames      = None
 
 # ==================================== #
 
@@ -202,7 +226,11 @@ class OrderParameter(object):
 
         # select order parameter estimation method
         if self.method == "mean":
-            self.estimate_mean(self.corrlist, kwargs)
+            self.estimate_mean(self.corrlist, **kwargs)
+        elif self.method == "single exp":
+            self.estimate_single_exp(**kwargs)
+        elif self.method == "double exp":
+            self.estimate_double_exp(**kwargs) 
         else:
             print("Order parameter estimation method unknown: {}".format(self.method))
             sys.exit(1)
@@ -225,25 +253,271 @@ class OrderParameter(object):
             they are not considered converged.
         """
 
-        for corrfun in self.corrlist:
-            length = corrfun.corr.shape[1]
+        self.S2all         = np.zeros([self.corrlist[0].corr.shape[0], len(self.corrlist)], dtype=np.float)
+        self.S2convergence = np.zeros_like(self.S2all, dtype=np.bool)
 
-#        length            = corr.shape[1]
-#        quarter           = length/4
-#        thirdQuarter      = corr[:,2*quarter:3*quarter]
-#        fourthQuarter     = corr[:,3*quarter:4*quarter]
-#        fourthQuarterMean = fourthQuarter.mean(1)
-#
-#        difference        = abs(thirdQuarter.mean(1) - fourthQuarterMean)
-#        stdev             = (thirdQuarter.std(1) + fourthQuarter.std(1)) / 2
-#        convergence       = np.logical_and(difference < diffThreshold, stdev < stdThreshold)
-#
-#        return fourthQuarterMean, convergence 
- 
+        # compute S2 values for each correlation function and judge convergence
+        for c, corrfun in enumerate(self.corrlist):
+            mean, convergence = self.estimate_mean_single(corrfun, diffThreshold=diffThreshold, stdThreshold=stdThreshold)
+            self.S2all[:,c]         = mean
+            self.S2convergence[:,c] = convergence
+
+        # compute global S2 as mean of individiual S2
+        if converged:
+            self.S2mean  = self.S2all.mean(1)
+            self.S2std   = self.S2all.std(1)
+            self.S2error = self.S2all.std(1) / self.S2all.shape[1]**0.5
+        else:
+            self.S2mean = np.zeros(self.S2all.shape[0])
+            self.S2std  = np.zeros(self.S2all.shape[0])
+            for n in range(self.S2all.shape[0]):
+                self.S2mean[n]  = self.S2all[:,self.S2convergence[n,:]].mean()
+                self.S2std[n]   = self.S2all[:,self.S2convergence[n,:]].std()
+                self.S2error[n] = self.S2std(n) / self.S2convergence[n,:].sum()
+
+        self.S2nconverged = self.S2convergence.sum(1)
+
+        # compute global S2 from average correlation functions
+        self.S2avg, self.S2avgConvergence = self.estimate_mean_single(self.avgcorr, diffThreshold=diffThreshold, stdThreshold=stdThreshold)
 
 # ==================================== #
 
-    def plot_corr(self, event=None, corrset=0):
+    def estimate_mean_single(self, corrfun, converged=True, diffThreshold=0.02, stdThreshold=0.02):
+        """
+        Estimate bond vector order parameters for a single set of correlation functions.
+        
+        Parameters
+        ----------
+        corrfun : (nvec, nframes) array
+            Single set of correlation functions
+        other parameters:
+            see function "estimate_mean()"
+        """
+
+        length            = corrfun.corr.shape[1]
+        quarter           = length / 4
+        thirdQuarter      = corrfun.corr[:,2*quarter:3*quarter]
+        fourthQuarter     = corrfun.corr[:,3*quarter:4*quarter]
+        fourthQuarterMean = fourthQuarter.mean(1)
+
+        difference        = abs(thirdQuarter.mean(1) - fourthQuarterMean)
+        stdev             = (thirdQuarter.std(1) + fourthQuarter.std(1)) / 2
+        convergence       = np.logical_and(difference < diffThreshold, stdev < stdThreshold)
+
+        return fourthQuarterMean, convergence 
+
+# ==================================== #
+
+    def estimate_single_exp(self, guess=[1.0, 1.0], avgonly=False):
+        """
+        Estimate bond vector order parameters from single exponential fits to the correlation functions.
+
+        Parameters
+        ----------
+        guess : [a, t1]
+            Initial guess of exponential coefficient and decay constant, defaults to 1's.  
+        avgonly : boolean, optional
+            Compute only the fit of the average 
+        """
+
+        if not avgonly:
+            self.S2all  = np.zeros([self.corrlist[0].corr.shape[0], len(self.corrlist)], dtype=np.float)
+            self.tauall = np.zeros_like(self.S2all)
+            self.popt   = np.zeros([self.corrlist[0].corr.shape[0], 2, len(self.corrlist)])
+            self.pvar   = np.zeros([self.corrlist[0].corr.shape[0], 2, len(self.corrlist)])
+
+            # compute S2 values for each correlation function
+            for c, corrfun in enumerate(self.corrlist):
+                print("\rProgress: {:.0f}%".format(100.0*(c+1)/len(self.corrlist)), end="")
+                sys.stdout.flush()
+                S2, tau, popt, pvar = self.estimate_single_exp_single(corrfun, guess=guess)
+                self.S2all[:,c]  = S2
+                self.tauall[:,c] = tau
+                self.popt[:,:,c] = popt
+                self.pvar[:,:,c] = pvar
+            print("\r", 100*" ", "\r", end="")
+     
+            # compute global S2 and tau as mean of individiual S2 and tau
+            self.S2mean   = self.S2all.mean(1)
+            self.S2std    = self.S2all.std(1)
+            self.S2error  = self.S2all.std(1) / self.S2all.shape[1]**0.5 
+            self.taumean  = self.tauall.mean(1)
+            self.taustd   = self.tauall.std(1)
+            self.tauerror = self.tauall.std(1) / self.tauall.shape[1]**0.5  
+
+        # compute global S2 from average correlation functions
+        self.S2avg, self.tauavg, self.poptavg, selv.pvaravg = self.estimate_single_exp_single(self.avgcorr, guess=guess)
+
+
+# ==================================== #
+
+    def estimate_single_exp_single(self, corrfun, guess=[1.0, 1.0]):
+        """
+        Estimate bond vector order parameters with a single exponential for a single set of correlation functions.
+
+        Parameters
+        ----------
+        corrfun : corrFunction
+            Correlation function object
+        guess : [a, t1]
+            Initial guess of exponential coefficient and decay constant, defaults to 1's. 
+
+        Returns
+        -------
+        S2 : (nvec) array
+            Array of S2 values per bond vector
+        tau : (nvec) array
+            Decay times of bond vector correlations
+        popt : (nvec, 2) array
+            fitted parameters for exponential fit
+        """
+        dt    = corrfun.dt
+        xdata = np.linspace(0, dt*corrfun.corr.shape[1], corrfun.corr.shape[1])
+        S2    = np.zeros(corrfun.corr.shape[0])
+        tau   = np.zeros(corrfun.corr.shape[0])
+        popt  = np.zeros([corrfun.corr.shape[0], 2])
+        pvar  = np.zeros([corrfun.corr.shape[0], 2])
+
+        for n in range(corrfun.corr.shape[0]):
+            try:
+                popt[n,:], pcov = curve_fit(_n_exp, xdata, corrfun.corr[n,:], p0=guess)
+                pvar[n,:] = np.diag(pcov)
+            except RuntimeError:
+                popt[n,:] = np.array([0.0, 0.0])
+                pvar[n,:] = np.array([0.0, 0.0])
+
+            S2[n]     = 1 - popt[n,0]
+            tau[n]    =     popt[n,1]
+
+        return S2, tau, popt, pvar
+
+# ==================================== #
+
+    def estimate_double_exp(self, guess=[1.0, 1.0, 1.0, 1.0], avgonly=False):
+        """
+        Estimate bond vector order parameters from double exponential fits to the correlation functions.
+
+        Parameters
+        ----------
+        guess : [a, b, t1, t2], optional
+            Initial guess of exponential coefficient and decay constant, defaults to 1's.  
+        avgonly : boolean, optional
+            Compute only the fit of the average
+        """
+
+        if not avgonly:
+            self.S2all  = np.zeros([self.corrlist[0].corr.shape[0], len(self.corrlist)], dtype=np.float)
+            self.tauall = np.zeros_like(self.S2all)
+            self.popt   = np.zeros([self.corrlist[0].corr.shape[0], 4, len(self.corrlist)])
+            self.pvar   = np.zeros([self.corrlist[0].corr.shape[0], 4, len(self.corrlist)])
+
+            # compute S2 values for each correlation function
+            for c, corrfun in enumerate(self.corrlist):
+                print("\rProgress: {:.0f}%".format(100.0*(c+1)/len(self.corrlist)), end="")
+                sys.stdout.flush()
+                S2, tau, popt, pvar = self.estimate_double_exp_single(corrfun, guess=guess)
+                self.S2all[:,c]  = S2
+                self.tauall[:,c] = tau
+                self.popt[:,:,c] = popt
+                self.pvar[:,:,c] = pvar
+            print("\r", 100*" ", "\r", end="")
+     
+            # compute global S2 and tau as mean of individiual S2 and tau
+            self.S2mean   = self.S2all.mean(1)
+            self.S2std    = self.S2all.std(1)
+            self.S2error  = self.S2all.std(1) / self.S2all.shape[1]**0.5 
+            self.taumean  = self.tauall.mean(1)
+            self.taustd   = self.tauall.std(1)
+            self.tauerror = self.tauall.std(1) / self.tauall.shape[1]**0.5  
+
+        # compute global S2 from average correlation functions
+        self.S2avg, self.tauavg, self.poptavg, self.pvaravg = self.estimate_double_exp_single(self.avgcorr, guess=guess)
+
+
+# ==================================== #
+
+    def estimate_double_exp_single(self, corrfun, guess=[1.0, 1.0, 1.0, 1.0]):
+        """
+        Estimate bond vector order parameters with a double exponential for a single set of correlation functions.
+
+        Parameters
+        ----------
+        corrfun : corrFunction
+            Correlation function object
+        guess : [a, b, t1, t2]
+            Initial guess of exponential coefficient and decay constant, defaults to 1's. 
+
+        Returns
+        -------
+        S2 : (nvec) array
+            Array of S2 values per bond vector
+        tau : (nvec) array
+            Decay times of bond vector correlations
+        popt : (nvec, 2) array
+            fitted parameters for exponential fit
+        """
+        dt    = corrfun.dt
+        xdata = np.linspace(0, dt*corrfun.corr.shape[1], corrfun.corr.shape[1])
+        S2    = np.zeros(corrfun.corr.shape[0])
+        tau   = np.zeros(corrfun.corr.shape[0])
+        tau2  = np.zeros(corrfun.corr.shape[0])
+        popt  = np.zeros([corrfun.corr.shape[0], 4])
+        pvar  = np.zeros([corrfun.corr.shape[0], 4])
+
+        nrandomguesses = 100
+
+        for n in range(corrfun.corr.shape[0]):
+            p0      = guess
+            counter = 0
+            while True:
+                counter += 1
+                try:
+                    popt[n,:], pcov = curve_fit(_n_exp, xdata, corrfun.corr[n,:], p0=p0)
+                    pvar[n,:] = np.diag(pcov)
+                    # fit was successful if it didn't raise an error and has proper error estimates
+                    if not float('NaN') in pvar[n,:]**0.5:
+                        break
+                    else:
+                        print("curve_fit failed with NaN error estimates") 
+                except RuntimeError:
+                    # change initial parameter guess
+                    if counter == 1 and n > 0:
+                        # second try with optimized values from previous iteration
+                        print("    trying previously optimized parameters as initial guess")
+                        p0 = popt[n-1,:]
+                    elif counter == 2 and n > 0:
+                        # third try with mean of optimized values from previous iterations
+                        print("    trying mean of previously optimized parameters as initial guess")
+                        p0 = popt[n:-1,:].mean(0)
+                    elif counter < 2 + nrandomguesses:
+                        # continue trying random values
+                        print("    trying random parameters as initial guess", counter)
+                        p0 = np.random.rand(len(p0)) + 10**np.random.randint(-2, 4, size=len(p0))
+                    else:
+                        # failed
+                        print("    failed to converge fitting")
+                        popt = float('Nan') * np.ones([len(p0)         ])
+                        pcov = float('Nan') * np.ones([len(p0), len(p0)])
+                        break
+ 
+
+            coeffs = popt[n,:2]
+            tconst = popt[n,2:]
+            coeffsvar = pvar[n,:2]
+            tconstvar = pvar[n,2:] 
+            srtidx = np.argsort(tconst)
+            popt[n,:2] = coeffs[srtidx]
+            popt[n,2:] = tconst[srtidx]
+            pvar[n,:2] = coeffsvar[srtidx]
+            pvar[n,2:] = tconstvar[srtidx] 
+            S2[n]     = 1 - popt[n,0]
+            tau[n]    =     popt[n,2]
+
+        return S2, tau, popt, pvar
+ 
+# ==================================== #
+
+    def plot_corr(self, event=None, corrset=None):
         """
         Plot correlation functions.
         
@@ -252,7 +526,8 @@ class OrderParameter(object):
         event : matplotlib mouse event
             Only there to update the plot on various matplotlib events, like mouse button presses
         corrset: integer, optional
-            Which set of correlation functions to use for plotting
+            Which set of correlation functions to use for plotting.
+            If None, plot the mean.
         """
 
         if self.figure is None:
@@ -265,31 +540,17 @@ class OrderParameter(object):
             self.cids['scroll'        ] = self.figure.canvas.mpl_connect('scroll_event',         self._onscroll)
             self.cids['close'         ] = self.figure.canvas.mpl_connect('close_event',          self._onclose)
 
-            self.corrset = corrset
+            if corrset is None:
+                self.corrset  = 0
+                self.plotMean = True
+            else:
+                self.corrset  = corrset
+                self.plotMean = False
             self.corridx = 0
             self.lines   = []
 
-
-#        self.corr        = corr
-#        self.std         = std
-#        self.error       = error
-#        self.resid       = info['bondvecinfo']['resid'     ]
-#        self.resindex    = info['bondvecinfo']['resindex'  ]
-#        self.resname     = info['bondvecinfo']['resnames'  ]
-#        self.atomindex   = info['bondvecinfo']['atomindex' ]
-#        self.atomname    = info['bondvecinfo']['atomnames' ]
-#        self.element     = info['bondvecinfo']['element'   ]
-#        self.chain       = info['bondvecinfo']['chain'     ]
-#        self.bondlength  = info['bondvecinfo']['bondlength']
-#        self.bondvec     = info['bondvecinfo']['bondvec'   ]
-#        self.fitgroup    = info['bondvecinfo']['fitgroup'  ]
-#        self.fit         = info['bondvecinfo']['fit'       ]
-#        self.dt          = info['bondvecinfo']['dt'        ]
-#        self.topfilename = info['topfilename']
-#        self.npzfilename = info['npzfilename']
-#        self.trjfilename = info['trjfilename'] 
-#        self.frames      = info['frames'     ]
- 
+            if self.avgcorr is None:
+                self.average_corr()
 
         # remove old data
         while len(self.lines) > 0:
@@ -298,10 +559,29 @@ class OrderParameter(object):
 
         # plot data
         corrFun     = self.corrlist[self.corrset]
-        xdata       = np.linspace(0, corrFun.corr.shape[1] * corrFun.dt, corrFun.corr.shape[1])
-        self.lines += self.axs.plot(xdata, corrFun.corr[self.corridx,:], 'b')
-        corrmean, corrstd, corrstdmean = self.average_corr()
-        self.lines += fill_between(xdata, corrmean[self.corridx,:]+corrstd[self.corridx,:], corrmean[self.corridx,:]-corrstd[self.corridx,:], alpha=0.4, color='r')
+        xdata       = np.linspace(0, corrFun.corr.shape[1] * corrFun.dt, corrFun.corr.shape[1])  
+        if self.plotMean:
+            self.lines += self.axs.plot(xdata, self.avgcorr.corr[self.corridx,:], 'b', label="Mean correlation function over {} samples".format(len(self.corrlist)), lw=2)
+            #self.lines.append(self.axs.fill_between(xdata, self.avgcorr.corr[self.corridx,:]+self.avgcorr.std[self.corridx,:],
+            #                                               self.avgcorr.corr[self.corridx,:]-self.avgcorr.std[self.corridx,:],
+            #                                               alpha=0.4, color='r')) 
+            self.lines.append(self.axs.fill_between(xdata, self.avgcorr.corr[self.corridx,:]+1.96*self.avgcorr.error[self.corridx,:],
+                                                           self.avgcorr.corr[self.corridx,:]-1.96*self.avgcorr.error[self.corridx,:],
+                                                           alpha=0.4, color='r', label="95% Confidence Interval")) 
+
+            try:
+                coeffs = " ".join(["{:.1e}".format(n) for n in self.poptavg[self.corridx,:]])
+                self.lines += self.axs.plot(xdata, _n_exp(xdata, *self.poptavg[self.corridx,:]), label="fit: {}".format(coeffs), color='g', lw=2)
+            except AttributeError:
+                pass
+
+        else:
+            self.lines += self.axs.plot(xdata, corrFun.corr[self.corridx,:], 'b', lw=2)
+            try:
+                coeffs = " ".join(["{:.1e}".format(n) for n in self.poptavg[self.corridx,:]])
+                self.lines += self.axs.plot(xdata, _n_exp(xdata, *self.popt[self.corridx,:, self.corrset]), label="fit: {}".format(coeffs), color='g', lw=2)
+            except AttributeError:
+                pass
 
         # set axis limits
         self.axs.set_ylim(min(0, corrFun.corr.min()), max(1, corrFun.corr.max()))
@@ -309,7 +589,7 @@ class OrderParameter(object):
         # plot scrollbar
         xmin, xmax = self.axs.get_xlim()
         self.lines += self.axs.plot([xmin, xmax], 2*[0.98], 'k', linewidth=2)
-        self.lines += self.axs.plot(xmin + self.corridx*(xmax-xmin)/corrFun.corr.shape[0], 0.98, 'sk', markersize=15)
+        self.lines += self.axs.plot(xmin + self.corridx*(xmax-xmin)/(corrFun.corr.shape[0]-1), 0.98, 'sk', markersize=15)
 
         # annotate plot
         self.axs.set_title("{} {}".format(corrFun.resname[0][self.corridx], corrFun.resid[0][self.corridx]))
@@ -504,13 +784,24 @@ def _bond_vec(trj, bondvec_ndx):
 
     # compute bond vectors
     bondvec = atom1_trj.xyz - atom2_trj.xyz
+    print(bondvec.shape)
+    sys.exit(0)
 
     # normalize bond vectors
     bondlength = (((bondvec**2).sum(2))**0.5)
     bondvec /= bondlength.reshape([bondvec.shape[0], bondvec.shape[1], 1])
 
+    # estimate S2 with ensemble average formula from:
+    # Trbovic et al. Proteins (2008). doi:10.1002/prot.21750
+    S2 = np.zeros_like(bondvec[:,:,0])
+    for i in range(3):
+        for j in range(3):
+            S2 += (bondvec[:,:,i] * bondvec[:,:,j]).mean(0)**2
+    S2 = list(0.5 * (3*S2 - 1))
+
     info = {}
     info['dt'        ] = trj.timestep
+    info['S2'        ] = S2
     info['bondlength'] = bondlength
     info['resnames'  ] = [[], []]
     info['resid'     ] = [[], []]
@@ -693,8 +984,16 @@ def load_corr(filename):
         Dictionary with information on the loaded correlation functions
     """
 
+    # create and change to working directory
+    cwd           = os.getcwd()
+    absfilename   = os.path.abspath(filename)
+    tmpdirnamelen = 8
+    tmpdirname    = "/tmp/" + ''.join(np.random.choice([i for i in string.letters + string.digits], size=tmpdirnamelen))
+    os.mkdir(tmpdirname)
+    os.chdir(tmpdirname)
+
     # extract files
-    with zipfile.ZipFile(filename, 'r') as infile:
+    with zipfile.ZipFile(absfilename, 'r') as infile:
         zipfilenames = infile.namelist()
         for zipfilename in zipfilenames:
             infile.extract(zipfilename)
@@ -714,6 +1013,10 @@ def load_corr(filename):
 
         # remove extracted files
         os.remove(zipfilename)
+
+    # change back to original cwd
+    os.chdir(cwd)
+    os.rmdir(tmpdirname)
 
     return corr, corrstd, corrstdmean, info
 
@@ -774,6 +1077,8 @@ def bondvec_corr(trj, bondvec=None, fitgroup=None, parallel=True, saveinfo=None,
     # store additional bond vector information
     if type(fitgroup) != type(None):
         bondvecinfo['fit' ] = True
+    else:
+        bondvecinfo['fit' ] = False
     bondvecinfo['fitgroup'] = fitgroup
     bondvecinfo['bondvec' ] = bondvec
 
@@ -929,116 +1234,143 @@ def bondvec_corr_batch_mpi(topfilename, trjfilenames, savepath, subtrjlength=Non
         print("Aggregated time for corr computation: {:8.0f} sec.".format(tc['corrtimer']))
         
 
+## ============================================================================ #
+#
+#
+#def _check_corr_convergence(corr, diffThreshold=0.02, stdThreshold=0.02):
+#    """
+#    Check the convergence of the bond vector correlation functions
+#
+#    Parameters
+#    ----------
+#    corr : (nbonds, nframes) array
+#        Correlation functions
+#
+#    diffThreshold: float, optional
+#        Maximum mean difference for convergence check.
+#
+#    stdThreshold: float, optional
+#        Maximum stdev difference for convergence check.
+#
+#    Returns
+#    -------
+#    
+#
+#        (convergence values, boolean array of converged correlation functions)
+#    """
+#    length            = corr.shape[1]
+#    quarter           = length/4
+#    thirdQuarter      = corr[:,2*quarter:3*quarter]
+#    fourthQuarter     = corr[:,3*quarter:4*quarter]
+#    fourthQuarterMean = fourthQuarter.mean(1)
+#    difference        = abs(thirdQuarter.mean(1) - fourthQuarterMean)
+#    stdev             = (thirdQuarter.std(1) + fourthQuarter.std(1)) / 2
+#    convergence       = np.logical_and(difference < diffThreshold, stdev < stdThreshold)
+#    return fourthQuarterMean, convergence
+# 
+#
+#
+## ============================================================================ #
+#
+#
+#def order_parameter_mean(corr, converged=True, diffThreshold=0.02, stdThreshold=0.02):
+#
+#    length            = corr.shape[1]
+#    quarter           = length/4
+#    thirdQuarter      = corr[:,2*quarter:3*quarter]
+#    fourthQuarter     = corr[:,3*quarter:4*quarter]
+#    fourthQuarterMean = fourthQuarter.mean(1)
+#
+#    difference        = abs(thirdQuarter.mean(1) - fourthQuarterMean)
+#    stdev             = (thirdQuarter.std(1) + fourthQuarter.std(1)) / 2
+#    convergence       = np.logical_and(difference < diffThreshold, stdev < stdThreshold)
+#
+#    return fourthQuarterMean, convergence 
+#
+#
+## ============================================================================ #
+#
+#
+#def order_parameter(corrfilenames, method="mean", converged=True, verbose=True, **kwargs):
+#    """
+#    Compute bond vector order parameters from correlation functions.
+#
+#    Parameters
+#    ----------
+#    corrfilenames : list
+#        List with *.zip filenames containing correlation functions.
+#        
+#    method: string, optional
+#        The method to use for order parameter computation.
+#        Options are:
+#            "mean"          Use the mean of the final quarter as order parameter
+#            "single exp"    Fit correlation functions to single exponential
+#            "double exp"    Fit correlation functions to double exponential
+#            "extLS"         Use the extended least squares method (method 3) from:
+#                            JPCB 2008, 112, 6155-6158, pubs.acs.org/doi/abs/10.1021/jp077018h
+#            "iRED"          Use the iRED method from:
+#                            Brüschweiler, JACS 2002, 124, 4522-4534, pubs.acs.org/doi/abs/10.1021/ja012750u
+#
+#    converged : boolean, optional, default: True
+#        Use only converged correlation functions for averaging
+#
+#    verbose : boolean, optional
+#        Report progress and other verbose output.
+#
+#    **kwargs : optional keyword arguments
+#        All remaining keyword arguments are passed to the order parameter method.
+#    """
+#
+#    starttime = time.time()
+#
+#    # load correlation functions
+#    corrlist = []
+#    print("Loading {} set{} of correlation functions:".format(len(corrfilenames), *['s' if i>1 else '' for i in [len(corrlist)]]))
+#    for nf, filename in enumerate(corrfilenames):
+#        corr, corrstd, corrstdmean, info = load_corr(filename)
+#        corrlist.append(corrFunction(corr, corrstd, corrstdmean, info))
+#        if verbose:
+#            print("\rProgress: {:3.0f}%".format(100.0*nf/len(corrfilenames)), end="")
+#            sys.stdout.flush()
+#
+#    # select order parameter estimation method
+#    if method == "mean":
+#        S2 = order_parameter_mean(corrlist, **kwargs)
+#    else:
+#        print("Order parameter estimation method unknown: {}".format(method))
+#        sys.exit(1)
+#
+#    # report runtime
+#    print("\rRuntime: {:.2f} sec.".format(time.time() - starttime))
+#
+#    return S2
+# 
+#
+## ============================================================================ #
+#
+
+def _n_exp(x, *args):
+    """
+    Evaluate the sum of n decaying exponentials depending on the length of *args.
+    n coefficients and n exponential decay constants are expected.
+    The coefficients are constraint to sum up to 1:
+        y = sum_i(ai * exp(x/-ti)) + 1 - sum_i(ai)
+    Example call:
+        _n_exp(x, a1, a2, a3, t1, t2, t3)
+    """
+    coefficients = args[:len(args)/2]
+    decayconst   = args[len(args)/2:]
+
+    if (np.array(decayconst) < 0).sum() > 0:
+        return x * float('NaN')
+
+    y = 0
+    for i, c, t in zip(range(len(decayconst)), coefficients, decayconst):
+        y += c * np.exp(x/(-1*t))
+    y += 1 - sum(coefficients)
+
+    return y
+
+
 # ============================================================================ #
-
-
-def _check_corr_convergence(corr, diffThreshold=0.02, stdThreshold=0.02):
-    """
-    Check the convergence of the bond vector correlation functions
-
-    Parameters
-    ----------
-    corr : (nbonds, nframes) array
-        Correlation functions
-
-    diffThreshold: float, optional
-        Maximum mean difference for convergence check.
-
-    stdThreshold: float, optional
-        Maximum stdev difference for convergence check.
-
-    Returns
-    -------
-    
-
-        (convergence values, boolean array of converged correlation functions)
-    """
-    length            = corr.shape[1]
-    quarter           = length/4
-    thirdQuarter      = corr[:,2*quarter:3*quarter]
-    fourthQuarter     = corr[:,3*quarter:4*quarter]
-    fourthQuarterMean = fourthQuarter.mean(1)
-    difference        = abs(thirdQuarter.mean(1) - fourthQuarterMean)
-    stdev             = (thirdQuarter.std(1) + fourthQuarter.std(1)) / 2
-    convergence       = np.logical_and(difference < diffThreshold, stdev < stdThreshold)
-    return fourthQuarterMean, convergence
  
-
-
-# ============================================================================ #
-
-
-def order_parameter_mean(corr, converged=True, diffThreshold=0.02, stdThreshold=0.02):
-
-    length            = corr.shape[1]
-    quarter           = length/4
-    thirdQuarter      = corr[:,2*quarter:3*quarter]
-    fourthQuarter     = corr[:,3*quarter:4*quarter]
-    fourthQuarterMean = fourthQuarter.mean(1)
-
-    difference        = abs(thirdQuarter.mean(1) - fourthQuarterMean)
-    stdev             = (thirdQuarter.std(1) + fourthQuarter.std(1)) / 2
-    convergence       = np.logical_and(difference < diffThreshold, stdev < stdThreshold)
-
-    return fourthQuarterMean, convergence 
-
-
-# ============================================================================ #
-
-
-def order_parameter(corrfilenames, method="mean", converged=True, verbose=True, **kwargs):
-    """
-    Compute bond vector order parameters from correlation functions.
-
-    Parameters
-    ----------
-    corrfilenames : list
-        List with *.zip filenames containing correlation functions.
-        
-    method: string, optional
-        The method to use for order parameter computation.
-        Options are:
-            "mean"          Use the mean of the final quarter as order parameter
-            "single exp"    Fit correlation functions to single exponential
-            "double exp"    Fit correlation functions to double exponential
-            "extLS"         Use the extended least squares method (method 3) from:
-                            JPCB 2008, 112, 6155-6158, pubs.acs.org/doi/abs/10.1021/jp077018h
-            "iRED"          Use the iRED method from:
-                            Brüschweiler, JACS 2002, 124, 4522-4534, pubs.acs.org/doi/abs/10.1021/ja012750u
-
-    converged : boolean, optional, default: True
-        Use only converged correlation functions for averaging
-
-    verbose : boolean, optional
-        Report progress and other verbose output.
-
-    **kwargs : optional keyword arguments
-        All remaining keyword arguments are passed to the order parameter method.
-    """
-
-    starttime = time.time()
-
-    # load correlation functions
-    corrlist = []
-    print("Loading {} set{} of correlation functions:".format(len(corrfilenames), *['s' if i>1 else '' for i in [len(corrlist)]]))
-    for nf, filename in enumerate(corrfilenames):
-        corr, corrstd, corrstdmean, info = load_corr(filename)
-        corrlist.append(corrFunction(corr, corrstd, corrstdmean, info))
-        if verbose:
-            print("\rProgress: {:3.0f}%".format(100.0*nf/len(corrfilenames)), end="")
-            sys.stdout.flush()
-
-    # select order parameter estimation method
-    if method == "mean":
-        S2 = order_parameter_mean(corrlist, **kwargs)
-    else:
-        print("Order parameter estimation method unknown: {}".format(method))
-        sys.exit(1)
-
-    # report runtime
-    print("\rRuntime: {:.2f} sec.".format(time.time() - starttime))
-
-    return S2
- 
-
-    
