@@ -784,8 +784,6 @@ def _bond_vec(trj, bondvec_ndx):
 
     # compute bond vectors
     bondvec = atom1_trj.xyz - atom2_trj.xyz
-    print(bondvec.shape)
-    sys.exit(0)
 
     # normalize bond vectors
     bondlength = (((bondvec**2).sum(2))**0.5)
