@@ -56,9 +56,9 @@ class corrFunction(object):
             except KeyError:
                 self.fit     = False
             try:
-                self.S2simple = info['bondvecinfo']['S2']
+                self.S2direct = np.array(info['bondvecinfo']['S2'])
             except KeyError:
-                self.S2simple = None
+                self.S2direct = None
             self.dt          = info['bondvecinfo']['dt'        ]
             self.topfilename = info['topfilename']
             self.npzfilename = info['npzfilename']
@@ -209,6 +209,8 @@ class OrderParameter(object):
         method: string, optional
             The method to use for order parameter computation.
             Options are:
+                "direct"        If provided, use S2 values directly approximated from the bond vectors as described in: 
+                                Trbovic et al. Proteins (2008). doi:10.1002/prot.21750
                 "mean"          Use the mean of the final quarter as order parameter
                 "single exp"    Fit correlation functions to single exponential
                 "double exp"    Fit correlation functions to double exponential
@@ -225,8 +227,10 @@ class OrderParameter(object):
         self.converged = converged
 
         # select order parameter estimation method
-        if self.method == "mean":
-            self.estimate_mean(self.corrlist, **kwargs)
+        if self.method == "direct":
+            self.estimate_direct(**kwargs)
+        elif self.method == "mean":
+            self.estimate_mean(**kwargs)
         elif self.method == "single exp":
             self.estimate_single_exp(**kwargs)
         elif self.method == "double exp":
@@ -235,6 +239,20 @@ class OrderParameter(object):
             print("Order parameter estimation method unknown: {}".format(self.method))
             sys.exit(1)
  
+# ==================================== #
+
+    def estimate_direct(self):
+        """
+        Estimate mean bond vector order parameters directly from estimates as described in:
+        Trbovic et al. Proteins (2008). doi:10.1002/prot.21750
+        """
+        self.S2all = np.zeros([self.corrlist[0].corr.shape[0], len(self.corrlist)], dtype=np.float)
+        for n, corrfun in enumerate(self.corrlist):
+            self.S2all[:,n] = corrfun.S2direct
+        self.S2mean  = self.S2all.mean(1)
+        self.S2std   = self.S2all.std(1)
+        self.S2error = self.S2all.std(1) / self.S2all.shape[1]**0.5 
+
 # ==================================== #
 
     def estimate_mean(self, converged=True, diffThreshold=0.02, stdThreshold=0.02):
@@ -791,7 +809,7 @@ def _bond_vec(trj, bondvec_ndx):
 
     # estimate S2 with ensemble average formula from:
     # Trbovic et al. Proteins (2008). doi:10.1002/prot.21750
-    S2 = np.zeros_like(bondvec[:,:,0])
+    S2 = np.zeros_like(bondvec[0,:,0])
     for i in range(3):
         for j in range(3):
             S2 += (bondvec[:,:,i] * bondvec[:,:,j]).mean(0)**2
