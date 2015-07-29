@@ -792,10 +792,11 @@ def _bond_vec(trj, bondvec_ndx):
     # estimate S2 with ensemble average formula from:
     # Trbovic et al. Proteins (2008). doi:10.1002/prot.21750
     S2 = np.zeros_like(bondvec[:,:,0])
+    print(S2.shape)
     for i in range(3):
         for j in range(3):
-            S2 += (bondvec[:,:,i] * bondvec[:,:,j]).mean(0)**2
-    S2 = list(0.5 * (3*S2 - 1))
+            S2 += (bondvec[:,:,i] * bondvec[:,:,j])**2
+    S2 = list(0.5 * (3*S2.mean(0) - 1))
 
     info = {}
     info['dt'        ] = trj.timestep
