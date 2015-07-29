@@ -794,8 +794,8 @@ def _bond_vec(trj, bondvec_ndx):
     S2 = np.zeros_like(bondvec[:,:,0])
     for i in range(3):
         for j in range(3):
-            S2 += (bondvec[:,:,i] * bondvec[:,:,j])**2
-    S2 = list(0.5 * (3*S2.mean(0) - 1))
+            S2 += (bondvec[:,:,i] * bondvec[:,:,j]).mean(0)**2
+    S2 = list(0.5 * (3*S2 - 1))
 
     info = {}
     info['dt'        ] = trj.timestep
