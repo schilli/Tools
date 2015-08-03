@@ -127,6 +127,7 @@ class OrderParameter(object):
         self.corrset = 0    # which set of correlation functions from the corrlist should be plottet
         self.corridx = 0    # which correlatin function to plot next
         self.leftButtonPressed = False
+        self.plotfit = None
 
         # load data
         if self.corrfilenames is not None:
@@ -214,10 +215,9 @@ class OrderParameter(object):
                 "mean"          Use the mean of the final quarter as order parameter
                 "single exp"    Fit correlation functions to single exponential
                 "double exp"    Fit correlation functions to double exponential
-                "extLS"         Use the extended least squares method (method 3) from:
+                "LS"            Use the Lipari Szabo model to estimate S2 values
+                "extLS"         Use the extended Lipari Szabo method (method 3) from:
                                 JPCB 2008, 112, 6155-6158, pubs.acs.org/doi/abs/10.1021/jp077018h
-                "iRED"          Use the iRED method from:
-                                Brüschweiler, JACS 2002, 124, 4522-4534, pubs.acs.org/doi/abs/10.1021/ja012750u
 
         converged : boolean, optional, default: True
             Use only converged correlation functions for averaging
@@ -235,6 +235,10 @@ class OrderParameter(object):
             self.estimate_single_exp(**kwargs)
         elif self.method == "double exp":
             self.estimate_double_exp(**kwargs) 
+        elif self.method == "LS":
+            self.estimate_LS(**kwargs)   
+        elif self.method == "extLS":
+            self.estimate_extLS(**kwargs)  
         else:
             print("Order parameter estimation method unknown: {}".format(self.method))
             sys.exit(1)
@@ -243,15 +247,18 @@ class OrderParameter(object):
 
     def estimate_direct(self):
         """
-        Estimate mean bond vector order parameters directly from estimates as described in:
+        Compute mean bond vector order parameters from direct estimates as described in:
         Trbovic et al. Proteins (2008). doi:10.1002/prot.21750
         """
-        self.S2all = np.zeros([self.corrlist[0].corr.shape[0], len(self.corrlist)], dtype=np.float)
-        for n, corrfun in enumerate(self.corrlist):
-            self.S2all[:,n] = corrfun.S2direct
-        self.S2mean  = self.S2all.mean(1)
-        self.S2std   = self.S2all.std(1)
-        self.S2error = self.S2all.std(1) / self.S2all.shape[1]**0.5 
+        if self.corrlist[0].S2direct is not None:
+            self.S2all = np.zeros([self.corrlist[0].corr.shape[0], len(self.corrlist)], dtype=np.float)
+            for n, corrfun in enumerate(self.corrlist):
+                self.S2all[:,n] = corrfun.S2direct
+            self.S2mean  = self.S2all.mean(1)
+            self.S2std   = self.S2all.std(1)
+            self.S2error = self.S2all.std(1) / self.S2all.shape[1]**0.5 
+        else:
+            print("Direct estimate of S2 not possible. Data not present in correlation functions.")
 
 # ==================================== #
 
@@ -338,6 +345,9 @@ class OrderParameter(object):
             Compute only the fit of the average 
         """
 
+        # compute global S2 from average correlation functions
+        self.S2avg, self.tauavg, self.poptavg, self.pvaravg = self.estimate_single_exp_single(self.avgcorr, guess=guess)
+
         if not avgonly:
             self.S2all  = np.zeros([self.corrlist[0].corr.shape[0], len(self.corrlist)], dtype=np.float)
             self.tauall = np.zeros_like(self.S2all)
@@ -362,10 +372,6 @@ class OrderParameter(object):
             self.taumean  = self.tauall.mean(1)
             self.taustd   = self.tauall.std(1)
             self.tauerror = self.tauall.std(1) / self.tauall.shape[1]**0.5  
-
-        # compute global S2 from average correlation functions
-        self.S2avg, self.tauavg, self.poptavg, selv.pvaravg = self.estimate_single_exp_single(self.avgcorr, guess=guess)
-
 
 # ==================================== #
 
@@ -423,6 +429,9 @@ class OrderParameter(object):
             Compute only the fit of the average
         """
 
+        # compute global S2 from average correlation functions
+        self.S2avg, self.tauavg, self.poptavg, self.pvaravg = self.estimate_double_exp_single(self.avgcorr, guess=guess)
+
         if not avgonly:
             self.S2all  = np.zeros([self.corrlist[0].corr.shape[0], len(self.corrlist)], dtype=np.float)
             self.tauall = np.zeros_like(self.S2all)
@@ -447,10 +456,6 @@ class OrderParameter(object):
             self.taumean  = self.tauall.mean(1)
             self.taustd   = self.tauall.std(1)
             self.tauerror = self.tauall.std(1) / self.tauall.shape[1]**0.5  
-
-        # compute global S2 from average correlation functions
-        self.S2avg, self.tauavg, self.poptavg, self.pvaravg = self.estimate_double_exp_single(self.avgcorr, guess=guess)
-
 
 # ==================================== #
 
@@ -485,7 +490,14 @@ class OrderParameter(object):
         nrandomguesses = 100
 
         for n in range(corrfun.corr.shape[0]):
-            p0      = guess
+            try:
+                if self.poptavg is not None and self.poptavg.shape[1] == len(guess):
+                    p0 = self.poptavg[n,:]
+                else:
+                    p0      = guess
+            except AttributeError:
+                p0      = guess
+
             counter = 0
             while True:
                 counter += 1
@@ -493,7 +505,7 @@ class OrderParameter(object):
                     popt[n,:], pcov = curve_fit(_n_exp, xdata, corrfun.corr[n,:], p0=p0)
                     pvar[n,:] = np.diag(pcov)
                     # fit was successful if it didn't raise an error and has proper error estimates
-                    if not float('NaN') in pvar[n,:]**0.5:
+                    if not float('NaN') in pvar[n,:]:
                         break
                     else:
                         print("curve_fit failed with NaN error estimates") 
@@ -514,8 +526,8 @@ class OrderParameter(object):
                     else:
                         # failed
                         print("    failed to converge fitting")
-                        popt = float('Nan') * np.ones([len(p0)         ])
-                        pcov = float('Nan') * np.ones([len(p0), len(p0)])
+                        popt[n,:] = float('Nan') * np.ones([len(p0)])
+                        pvar[n,:] = float('Nan') * np.ones([len(p0)])
                         break
  
 
@@ -535,7 +547,186 @@ class OrderParameter(object):
  
 # ==================================== #
 
-    def plot_corr(self, event=None, corrset=None):
+    def estimate_LS(self, guess=[0.8, 10.0, 100.0], avgonly=False):
+
+        # compute global S2 from average correlation functions
+        self.S2avg, self.poptavg, self.pvaravg = self.estimate_LS_single(self.avgcorr, guess=guess)
+ 
+        if not avgonly:
+            self.S2all  = np.zeros([self.corrlist[0].corr.shape[0], len(self.corrlist)], dtype=np.float)
+            self.popt   = np.zeros([self.corrlist[0].corr.shape[0], len(guess), len(self.corrlist)])
+            self.pvar   = np.zeros([self.corrlist[0].corr.shape[0], len(guess), len(self.corrlist)])
+
+            # compute S2 values for each correlation function
+            for c, corrfun in enumerate(self.corrlist):
+                print("\rProgress: {:.0f}%".format(100.0*(c+1)/len(self.corrlist)), end="")
+                sys.stdout.flush()
+                S2, popt, pvar = self.estimate_LS_single(corrfun, guess=guess)
+                self.S2all[:,c]  = S2
+                self.popt[:,:,c] = popt
+                self.pvar[:,:,c] = pvar
+            print("\r", 100*" ", "\r", end="")
+     
+            # compute global S2 and tau as mean of individiual S2 and tau
+            self.S2mean   = self.S2all.mean(1)
+            self.S2std    = self.S2all.std(1)
+            self.S2error  = self.S2all.std(1) / self.S2all.shape[1]**0.5 
+
+# ==================================== #
+
+    def estimate_LS_single(self, corrfun, guess=[0.8, 10.0, 100.0]):
+
+        dt    = corrfun.dt
+        xdata = np.linspace(0, dt*corrfun.corr.shape[1], corrfun.corr.shape[1])
+        S2    = np.zeros(corrfun.corr.shape[0])
+        popt  = np.zeros([corrfun.corr.shape[0], len(guess)])
+        pvar  = np.zeros([corrfun.corr.shape[0], len(guess)])
+
+        nrandomguesses = 100
+
+        for n in range(corrfun.corr.shape[0]):
+            try:
+                if self.poptavg is not None and self.poptavg.shape[1] == len(guess):
+                    p0 = self.poptavg[n,:]
+                else:
+                    p0      = guess
+            except AttributeError:
+                p0      = guess
+
+            counter = 0
+            while True:
+                counter += 1
+                try:
+                    popt[n,:], pcov = curve_fit(LipariSzabo, xdata, corrfun.corr[n,:], p0=guess)
+                    pvar[n,:] = np.diag(pcov)
+                    # fit was successful if it didn't raise an error and has proper error estimates
+                    if not float('NaN') in pvar[n,:]:
+                        break
+                    else:
+                        print("curve_fit failed with NaN error estimates") 
+                except RuntimeError:
+                    # change initial parameter guess
+                    if counter == 1 and n > 0:
+                        # second try with optimized values from previous iteration
+                        print("    trying previously optimized parameters as initial guess")
+                        p0 = popt[n-1,:]
+                    elif counter == 2 and n > 0:
+                        # third try with mean of optimized values from previous iterations
+                        print("    trying mean of previously optimized parameters as initial guess")
+                        p0 = popt[n:-1,:].mean(0)
+                    elif counter < 2 + nrandomguesses:
+                        # continue trying random values
+                        print("    trying random parameters as initial guess", counter)
+                        p0 = np.random.rand(len(p0)) + 10**np.random.randint(-2, 4, size=len(p0))
+                    else:
+                        # failed
+                        print("    failed to converge fitting")
+                        popt[n,:] = float('Nan') * np.ones([len(p0)])
+                        pvar[n,:] = float('Nan') * np.ones([len(p0)])
+                        break 
+
+        S2 = popt[:,0]
+        return S2, popt, pvar
+
+# ==================================== #
+
+    def estimate_extLS(self, guess=[0.8, 0.9, 10.0, 100.0], avgonly=False):
+
+        # compute global S2 from average correlation functions
+        self.S2avg, self.poptavg, self.pvaravg = self.estimate_extLS_single(self.avgcorr, guess=guess)
+ 
+        if not avgonly:
+            self.S2all  = np.zeros([self.corrlist[0].corr.shape[0], len(self.corrlist)], dtype=np.float)
+            self.popt   = np.zeros([self.corrlist[0].corr.shape[0], len(guess), len(self.corrlist)])
+            self.pvar   = np.zeros([self.corrlist[0].corr.shape[0], len(guess), len(self.corrlist)])
+
+            # compute S2 values for each correlation function
+            for c, corrfun in enumerate(self.corrlist):
+                print("\rProgress: {:.0f}%".format(100.0*(c+1)/len(self.corrlist)), end="")
+                sys.stdout.flush()
+                S2, popt, pvar = self.estimate_extLS_single(corrfun, guess=guess)
+                self.S2all[:,c]  = S2
+                self.popt[:,:,c] = popt
+                self.pvar[:,:,c] = pvar
+            print("\r", 100*" ", "\r", end="")
+     
+            # compute global S2 and tau as mean of individiual S2 and tau
+            self.S2mean   = self.S2all.mean(1)
+            self.S2std    = self.S2all.std(1)
+            self.S2error  = self.S2all.std(1) / self.S2all.shape[1]**0.5 
+
+# ==================================== #
+
+    def estimate_extLS_single(self, corrfun, guess=[0.8, 0.9, 10.0, 100.0]):
+
+        dt    = corrfun.dt
+        xdata = np.linspace(0, dt*corrfun.corr.shape[1], corrfun.corr.shape[1])
+        S2    = np.zeros(corrfun.corr.shape[0])
+        popt  = np.zeros([corrfun.corr.shape[0], len(guess)])
+        pvar  = np.zeros([corrfun.corr.shape[0], len(guess)])
+
+        nrandomguesses = 0
+
+        for n in range(corrfun.corr.shape[0]):
+            try:
+                if self.poptavg is not None and self.poptavg.shape[1] == len(guess):
+                    p0 = self.poptavg[n,:]
+                else:
+                    p0      = guess
+            except AttributeError:
+                p0      = guess
+
+            counter = 0
+            while True:
+                counter += 1
+                try:
+                    # do the fit without the first point (t=0)
+                    popt[n,:], pcov = curve_fit(extLipariSzabo, xdata[1:], corrfun.corr[n,1:], p0=p0)
+                    pvar[n,:] = np.diag(pcov)
+                    # fit was successful if it didn't raise an error and has proper parameter estimates
+                    if np.isnan(popt[n,:]).sum() == 0 and np.isinf(pvar[n,:]).sum() == 0 and popt[n,1] > 0 and popt[n,1] <= 1.0:
+                        break
+                    else:
+                        #print("curve_fit failed with NaN error estimates for n = {}".format(n)) 
+                        raise RuntimeError
+                except RuntimeError:
+                    # change initial parameter guess
+                    if counter == 1:
+                        # second try with all ones as initial parameter guess
+                        p0 = len(guess) * [1.0]
+                        print("    trying all ones as initial guess")
+                    elif counter == 2 and n > 0:
+                        # third try with optimized values from previous iteration
+                        print("    trying previously optimized parameters as initial guess")
+                        p0 = popt[n-1,:]
+                    elif counter == 3 and n > 0:
+                        # fourth try with mean of optimized values from previous iterations
+                        print("    trying mean of previously optimized parameters as initial guess")
+                        p0 = popt[n:-1,:].mean(0)
+                    elif counter < 3 + nrandomguesses:
+                        # continue trying random values
+                        print("    trying random parameters as initial guess", counter)
+                        p0 = np.random.rand(len(p0)) + 10**np.random.randint(-2, 4, size=len(p0))
+                    else:
+                        # failed
+                        print("    failed to converge fitting for n = {}".format(n))
+                        print("    trying normal LS instead")
+                        popt[n,[0,2,3]], pcov = curve_fit(LipariSzabo, xdata, corrfun.corr[n,:])
+                        pvar[n,[0,2,3]] = np.diag(pcov)
+                        popt[n,1] = 1.0
+                        pvar[n,1] = 0.0
+                        #popt[n,:] = float('Nan') * np.ones([len(p0)])
+                        #pvar[n,:] = float('Nan') * np.ones([len(p0)])
+                        break 
+#            print(n, popt[n,:], pvar[n,:])
+
+        S2 = popt[:,0]
+        return S2, popt, pvar
+ 
+
+# ==================================== #
+
+    def plot_corr(self, event=None, corrset=None, fit=None):
         """
         Plot correlation functions.
         
@@ -546,7 +737,14 @@ class OrderParameter(object):
         corrset: integer, optional
             Which set of correlation functions to use for plotting.
             If None, plot the mean.
+        fit: string
+            What fit should be plotted? Options are:
+                "double exp"
+                "LS"
         """
+
+        if fit is not None:
+            self.plotfit = fit
 
         if self.figure is None:
             # create figure and axis
@@ -575,31 +773,49 @@ class OrderParameter(object):
             line = self.lines.pop()
             line.remove() 
 
+        start_idx = 0
+#        if self.plotfit in ["extLS"]:
+#            start_idx = 1
+
         # plot data
         corrFun     = self.corrlist[self.corrset]
         xdata       = np.linspace(0, corrFun.corr.shape[1] * corrFun.dt, corrFun.corr.shape[1])  
         if self.plotMean:
-            self.lines += self.axs.plot(xdata, self.avgcorr.corr[self.corridx,:], 'b', label="Mean correlation function over {} samples".format(len(self.corrlist)), lw=2)
-            #self.lines.append(self.axs.fill_between(xdata, self.avgcorr.corr[self.corridx,:]+self.avgcorr.std[self.corridx,:],
-            #                                               self.avgcorr.corr[self.corridx,:]-self.avgcorr.std[self.corridx,:],
+            self.lines += self.axs.plot(xdata[start_idx:], self.avgcorr.corr[self.corridx,start_idx:], 'b', label="Mean correlation function over {} samples".format(len(self.corrlist)), lw=2)
+            #self.lines.append(self.axs.fill_between(xdata[start_idx:], self.avgcorr.corr[self.corridx,start_idx:]+self.avgcorr.std[self.corridx,:],
+            #                                               self.avgcorr.corr[self.corridx,start_idx:]-self.avgcorr.std[self.corridx,:],
             #                                               alpha=0.4, color='r')) 
-            self.lines.append(self.axs.fill_between(xdata, self.avgcorr.corr[self.corridx,:]+1.96*self.avgcorr.error[self.corridx,:],
-                                                           self.avgcorr.corr[self.corridx,:]-1.96*self.avgcorr.error[self.corridx,:],
+            self.lines.append(self.axs.fill_between(xdata[start_idx:], self.avgcorr.corr[self.corridx,start_idx:]+1.96*self.avgcorr.error[self.corridx,start_idx:],
+                                                           self.avgcorr.corr[self.corridx,start_idx:]-1.96*self.avgcorr.error[self.corridx,start_idx:],
                                                            alpha=0.4, color='r', label="95% Confidence Interval")) 
 
             try:
                 coeffs = " ".join(["{:.1e}".format(n) for n in self.poptavg[self.corridx,:]])
-                self.lines += self.axs.plot(xdata, _n_exp(xdata, *self.poptavg[self.corridx,:]), label="fit: {}".format(coeffs), color='g', lw=2)
-            except AttributeError:
-                pass
+            except AttributeError as e:
+                print("Did you forget to fit the data?")
+                raise e
+            xdata  = np.linspace(0, corrFun.corr.shape[1] * corrFun.dt, 10*corrFun.corr.shape[1])  
+            if self.plotfit in ["single exp", "double exp"]:
+                self.lines += self.axs.plot(xdata[start_idx:], _n_exp(xdata[start_idx:], *self.poptavg[self.corridx,:]), label="fit: {}".format(coeffs), color='g', lw=2)
+            elif self.plotfit == "LS":
+                self.lines += self.axs.plot(xdata[start_idx:], LipariSzabo(xdata[start_idx:], *self.poptavg[self.corridx,:]), label="fit: {}".format(coeffs), color='g', lw=2)
+            elif self.plotfit == "extLS":
+                self.lines += self.axs.plot(xdata[start_idx:], extLipariSzabo(xdata[start_idx:], *self.poptavg[self.corridx,:]), label="fit: {}".format(coeffs), color='g', lw=2)
 
         else:
-            self.lines += self.axs.plot(xdata, corrFun.corr[self.corridx,:], 'b', lw=2)
+            self.lines += self.axs.plot(xdata[start_idx:], corrFun.corr[self.corridx,start_idx:], 'b', lw=2)
             try:
                 coeffs = " ".join(["{:.1e}".format(n) for n in self.poptavg[self.corridx,:]])
-                self.lines += self.axs.plot(xdata, _n_exp(xdata, *self.popt[self.corridx,:, self.corrset]), label="fit: {}".format(coeffs), color='g', lw=2)
-            except AttributeError:
-                pass
+            except AttributeError as e:
+                print("Did you forget to fit the data?")
+                raise e 
+            xdata  = np.linspace(0, corrFun.corr.shape[1] * corrFun.dt, 10*corrFun.corr.shape[1])  
+            if self.plotfit in ["single exp", "double exp"]:
+                self.lines += self.axs.plot(xdata[start_idx:], _n_exp(xdata[start_idx:], *self.popt[self.corridx,start_idx:, self.corrset]), label="fit: {}".format(coeffs), color='g', lw=2)
+            elif self.plotfit == "LS":
+                self.lines += self.axs.plot(xdata[start_idx:], LipariSzabo(xdata[start_idx:], *self.popt[self.corridx,:, self.corrset]), label="fit: {}".format(coeffs), color='g', lw=2)
+            elif self.plotfit == "extLS":
+                self.lines += self.axs.plot(xdata[start_idx:], extLipariSzabo(xdata[start_idx:], *self.popt[self.corridx,:]), label="fit: {}".format(coeffs), color='g', lw=2) 
 
         # set axis limits
         self.axs.set_ylim(min(0, corrFun.corr.min()), max(1, corrFun.corr.max()))
@@ -797,11 +1013,14 @@ def _bond_vec(trj, bondvec_ndx):
     """
 
     # extract bond vector subtrajectories
-    atom1_trj = trj.atom_slice(bondvec_ndx[:,0])
-    atom2_trj = trj.atom_slice(bondvec_ndx[:,1])
+    atom1_xyz = trj.xyz[:,bondvec_ndx[:,0],:]
+    atom2_xyz = trj.xyz[:,bondvec_ndx[:,1],:]
+    #atom1_trj = trj.atom_slice(bondvec_ndx[:,0])
+    #atom2_trj = trj.atom_slice(bondvec_ndx[:,1])
 
     # compute bond vectors
-    bondvec = atom1_trj.xyz - atom2_trj.xyz
+    bondvec = atom1_xyz - atom2_xyz
+    #bondvec = atom1_trj.xyz - atom2_trj.xyz
 
     # normalize bond vectors
     bondlength = (((bondvec**2).sum(2))**0.5)
@@ -828,7 +1047,10 @@ def _bond_vec(trj, bondvec_ndx):
     info['chain'     ] = [[], []]
 
     # get info on atoms and residues
-    for atom1, atom2 in zip(atom1_trj.top.atoms, atom2_trj.top.atoms):
+    #for atom1, atom2 in zip(atom1_trj.top.atoms, atom2_trj.top.atoms):
+    for atom1_ndx, atom2_ndx in bondvec_ndx:
+        atom1 = trj.topology.atom(atom1_ndx)
+        atom2 = trj.topology.atom(atom2_ndx)
         info['resnames'  ][0].append(atom1.residue.name)
         info['resnames'  ][1].append(atom2.residue.name)
         info['resid'     ][0].append(atom1.residue.resSeq)
@@ -1250,120 +1472,120 @@ def bondvec_corr_batch_mpi(topfilename, trjfilenames, savepath, subtrjlength=Non
         print("Aggregated time for corr computation: {:8.0f} sec.".format(tc['corrtimer']))
         
 
-## ============================================================================ #
-#
-#
-#def _check_corr_convergence(corr, diffThreshold=0.02, stdThreshold=0.02):
-#    """
-#    Check the convergence of the bond vector correlation functions
-#
-#    Parameters
-#    ----------
-#    corr : (nbonds, nframes) array
-#        Correlation functions
-#
-#    diffThreshold: float, optional
-#        Maximum mean difference for convergence check.
-#
-#    stdThreshold: float, optional
-#        Maximum stdev difference for convergence check.
-#
-#    Returns
-#    -------
-#    
-#
-#        (convergence values, boolean array of converged correlation functions)
-#    """
-#    length            = corr.shape[1]
-#    quarter           = length/4
-#    thirdQuarter      = corr[:,2*quarter:3*quarter]
-#    fourthQuarter     = corr[:,3*quarter:4*quarter]
-#    fourthQuarterMean = fourthQuarter.mean(1)
-#    difference        = abs(thirdQuarter.mean(1) - fourthQuarterMean)
-#    stdev             = (thirdQuarter.std(1) + fourthQuarter.std(1)) / 2
-#    convergence       = np.logical_and(difference < diffThreshold, stdev < stdThreshold)
-#    return fourthQuarterMean, convergence
-# 
-#
-#
-## ============================================================================ #
-#
-#
-#def order_parameter_mean(corr, converged=True, diffThreshold=0.02, stdThreshold=0.02):
-#
-#    length            = corr.shape[1]
-#    quarter           = length/4
-#    thirdQuarter      = corr[:,2*quarter:3*quarter]
-#    fourthQuarter     = corr[:,3*quarter:4*quarter]
-#    fourthQuarterMean = fourthQuarter.mean(1)
-#
-#    difference        = abs(thirdQuarter.mean(1) - fourthQuarterMean)
-#    stdev             = (thirdQuarter.std(1) + fourthQuarter.std(1)) / 2
-#    convergence       = np.logical_and(difference < diffThreshold, stdev < stdThreshold)
-#
-#    return fourthQuarterMean, convergence 
-#
-#
-## ============================================================================ #
-#
-#
-#def order_parameter(corrfilenames, method="mean", converged=True, verbose=True, **kwargs):
-#    """
-#    Compute bond vector order parameters from correlation functions.
-#
-#    Parameters
-#    ----------
-#    corrfilenames : list
-#        List with *.zip filenames containing correlation functions.
-#        
-#    method: string, optional
-#        The method to use for order parameter computation.
-#        Options are:
-#            "mean"          Use the mean of the final quarter as order parameter
-#            "single exp"    Fit correlation functions to single exponential
-#            "double exp"    Fit correlation functions to double exponential
-#            "extLS"         Use the extended least squares method (method 3) from:
-#                            JPCB 2008, 112, 6155-6158, pubs.acs.org/doi/abs/10.1021/jp077018h
-#            "iRED"          Use the iRED method from:
-#                            Brüschweiler, JACS 2002, 124, 4522-4534, pubs.acs.org/doi/abs/10.1021/ja012750u
-#
-#    converged : boolean, optional, default: True
-#        Use only converged correlation functions for averaging
-#
-#    verbose : boolean, optional
-#        Report progress and other verbose output.
-#
-#    **kwargs : optional keyword arguments
-#        All remaining keyword arguments are passed to the order parameter method.
-#    """
-#
-#    starttime = time.time()
-#
-#    # load correlation functions
-#    corrlist = []
-#    print("Loading {} set{} of correlation functions:".format(len(corrfilenames), *['s' if i>1 else '' for i in [len(corrlist)]]))
-#    for nf, filename in enumerate(corrfilenames):
-#        corr, corrstd, corrstdmean, info = load_corr(filename)
-#        corrlist.append(corrFunction(corr, corrstd, corrstdmean, info))
-#        if verbose:
-#            print("\rProgress: {:3.0f}%".format(100.0*nf/len(corrfilenames)), end="")
-#            sys.stdout.flush()
-#
-#    # select order parameter estimation method
-#    if method == "mean":
-#        S2 = order_parameter_mean(corrlist, **kwargs)
-#    else:
-#        print("Order parameter estimation method unknown: {}".format(method))
-#        sys.exit(1)
-#
-#    # report runtime
-#    print("\rRuntime: {:.2f} sec.".format(time.time() - starttime))
-#
-#    return S2
-# 
-#
-## ============================================================================ #
-#
+# ============================================================================ #
+
+
+def _check_corr_convergence(corr, diffThreshold=0.02, stdThreshold=0.02):
+    """
+    Check the convergence of the bond vector correlation functions
+
+    Parameters
+    ----------
+    corr : (nbonds, nframes) array
+        Correlation functions
+
+    diffThreshold: float, optional
+        Maximum mean difference for convergence check.
+
+    stdThreshold: float, optional
+        Maximum stdev difference for convergence check.
+
+    Returns
+    -------
+    
+
+        (convergence values, boolean array of converged correlation functions)
+    """
+    length            = corr.shape[1]
+    quarter           = length/4
+    thirdQuarter      = corr[:,2*quarter:3*quarter]
+    fourthQuarter     = corr[:,3*quarter:4*quarter]
+    fourthQuarterMean = fourthQuarter.mean(1)
+    difference        = abs(thirdQuarter.mean(1) - fourthQuarterMean)
+    stdev             = (thirdQuarter.std(1) + fourthQuarter.std(1)) / 2
+    convergence       = np.logical_and(difference < diffThreshold, stdev < stdThreshold)
+    return fourthQuarterMean, convergence
+ 
+
+
+# ============================================================================ #
+
+
+def order_parameter_mean(corr, converged=True, diffThreshold=0.02, stdThreshold=0.02):
+
+    length            = corr.shape[1]
+    quarter           = length/4
+    thirdQuarter      = corr[:,2*quarter:3*quarter]
+    fourthQuarter     = corr[:,3*quarter:4*quarter]
+    fourthQuarterMean = fourthQuarter.mean(1)
+
+    difference        = abs(thirdQuarter.mean(1) - fourthQuarterMean)
+    stdev             = (thirdQuarter.std(1) + fourthQuarter.std(1)) / 2
+    convergence       = np.logical_and(difference < diffThreshold, stdev < stdThreshold)
+
+    return fourthQuarterMean, convergence 
+
+
+# ============================================================================ #
+
+
+def order_parameter(corrfilenames, method="mean", converged=True, verbose=True, **kwargs):
+    """
+    Compute bond vector order parameters from correlation functions.
+
+    Parameters
+    ----------
+    corrfilenames : list
+        List with *.zip filenames containing correlation functions.
+        
+    method: string, optional
+        The method to use for order parameter computation.
+        Options are:
+            "mean"          Use the mean of the final quarter as order parameter
+            "single exp"    Fit correlation functions to single exponential
+            "double exp"    Fit correlation functions to double exponential
+            "extLS"         Use the extended least squares method (method 3) from:
+                            JPCB 2008, 112, 6155-6158, pubs.acs.org/doi/abs/10.1021/jp077018h
+            "iRED"          Use the iRED method from:
+                            Brüschweiler, JACS 2002, 124, 4522-4534, pubs.acs.org/doi/abs/10.1021/ja012750u
+
+    converged : boolean, optional, default: True
+        Use only converged correlation functions for averaging
+
+    verbose : boolean, optional
+        Report progress and other verbose output.
+
+    **kwargs : optional keyword arguments
+        All remaining keyword arguments are passed to the order parameter method.
+    """
+
+    starttime = time.time()
+
+    # load correlation functions
+    corrlist = []
+    print("Loading {} set{} of correlation functions:".format(len(corrfilenames), *['s' if i>1 else '' for i in [len(corrlist)]]))
+    for nf, filename in enumerate(corrfilenames):
+        corr, corrstd, corrstdmean, info = load_corr(filename)
+        corrlist.append(corrFunction(corr, corrstd, corrstdmean, info))
+        if verbose:
+            print("\rProgress: {:3.0f}%".format(100.0*nf/len(corrfilenames)), end="")
+            sys.stdout.flush()
+
+    # select order parameter estimation method
+    if method == "mean":
+        S2 = order_parameter_mean(corrlist, **kwargs)
+    else:
+        print("Order parameter estimation method unknown: {}".format(method))
+        sys.exit(1)
+
+    # report runtime
+    print("\rRuntime: {:.2f} sec.".format(time.time() - starttime))
+
+    return S2
+ 
+
+# ============================================================================ #
+
 
 def _n_exp(x, *args):
     """
@@ -1387,6 +1609,30 @@ def _n_exp(x, *args):
 
     return y
 
+
+# ============================================================================ #
+
+
+def LipariSzabo(t, S2, te, tm):
+    """
+    Evaluate the Liapri Szabo model:
+    C(t) = exp(-t/tm) * (S2 + (1-S2)*exp(-t/te)))
+    """
+    C = np.exp(-t/tm) * (S2 + (1-S2)*np.exp(-t/te))
+    return C
+
+
+# ============================================================================ #
+
+
+def extLipariSzabo(t, S2, Sf, te, tm):
+    """
+    Evaluate the extended Liapri Szabo model:
+    C(t) = exp(-t/tm) * (S2 + (Sf-S2)*exp(-t/te)))
+    """
+    C = np.exp(-t/tm) * (S2 + (Sf-S2)*np.exp(-t/te))
+    return C
+ 
 
 # ============================================================================ #
  
