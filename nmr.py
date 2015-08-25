@@ -10,7 +10,10 @@ import cPickle as pickle
 import zipfile, bz2
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
+from scipy.optimize import minimize
 from mpi4py import MPI
+
+import warnings
 
 
 # ============================================================================ #
@@ -230,7 +233,7 @@ class OrderParameter(object):
         if self.method == "direct":
             self.estimate_direct(**kwargs)
         elif self.method == "mean":
-            self.estimate_mean(**kwargs)
+            self.estimate_mean(converged=self.converged, **kwargs)
         elif self.method == "single exp":
             self.estimate_single_exp(**kwargs)
         elif self.method == "double exp":
@@ -239,6 +242,10 @@ class OrderParameter(object):
             self.estimate_LS(**kwargs)   
         elif self.method == "extLS":
             self.estimate_extLS(**kwargs)  
+        elif self.method == "CloreLS":
+            self.estimate_CloreLS(**kwargs)   
+        elif self.method == "extCloreLS":
+            self.estimate_extCloreLS(**kwargs)    
         else:
             print("Order parameter estimation method unknown: {}".format(self.method))
             sys.exit(1)
@@ -288,17 +295,18 @@ class OrderParameter(object):
             self.S2convergence[:,c] = convergence
 
         # compute global S2 as mean of individiual S2
-        if converged:
+        if not converged:
             self.S2mean  = self.S2all.mean(1)
             self.S2std   = self.S2all.std(1)
             self.S2error = self.S2all.std(1) / self.S2all.shape[1]**0.5
         else:
-            self.S2mean = np.zeros(self.S2all.shape[0])
-            self.S2std  = np.zeros(self.S2all.shape[0])
+            self.S2mean  = np.zeros(self.S2all.shape[0])
+            self.S2std   = np.zeros(self.S2all.shape[0])
+            self.S2error = np.zeros(self.S2all.shape[0])
             for n in range(self.S2all.shape[0]):
                 self.S2mean[n]  = self.S2all[:,self.S2convergence[n,:]].mean()
                 self.S2std[n]   = self.S2all[:,self.S2convergence[n,:]].std()
-                self.S2error[n] = self.S2std(n) / self.S2convergence[n,:].sum()
+                self.S2error[n] = self.S2std[n] / self.S2convergence[n,:].sum()
 
         self.S2nconverged = self.S2convergence.sum(1)
 
@@ -402,13 +410,18 @@ class OrderParameter(object):
         popt  = np.zeros([corrfun.corr.shape[0], 2])
         pvar  = np.zeros([corrfun.corr.shape[0], 2])
 
+        bounds = ((0,1), (0,None))
+
         for n in range(corrfun.corr.shape[0]):
-            try:
-                popt[n,:], pcov = curve_fit(_n_exp, xdata, corrfun.corr[n,:], p0=guess)
-                pvar[n,:] = np.diag(pcov)
-            except RuntimeError:
-                popt[n,:] = np.array([0.0, 0.0])
-                pvar[n,:] = np.array([0.0, 0.0])
+            res = minimize(n_exp_obj, x0=guess, args=(xdata, self.avgcorr.corr[n,:]), bounds=bounds)
+            popt[n,:] = res.x  
+            #try:
+
+            #    popt[n,:], pcov = curve_fit(n_exp, xdata, corrfun.corr[n,:], p0=guess)
+            #    pvar[n,:] = np.diag(pcov)
+            #except RuntimeError:
+            #    popt[n,:] = np.array([0.0, 0.0])
+            #    pvar[n,:] = np.array([0.0, 0.0])
 
             S2[n]     = 1 - popt[n,0]
             tau[n]    =     popt[n,1]
@@ -502,7 +515,7 @@ class OrderParameter(object):
             while True:
                 counter += 1
                 try:
-                    popt[n,:], pcov = curve_fit(_n_exp, xdata, corrfun.corr[n,:], p0=p0)
+                    popt[n,:], pcov = curve_fit(n_exp, xdata, corrfun.corr[n,:], p0=p0)
                     pvar[n,:] = np.diag(pcov)
                     # fit was successful if it didn't raise an error and has proper error estimates
                     if not float('NaN') in pvar[n,:]:
@@ -630,10 +643,10 @@ class OrderParameter(object):
 
 # ==================================== #
 
-    def estimate_extLS(self, guess=[0.8, 0.9, 10.0, 100.0], avgonly=False):
+    def estimate_extLS(self, guess=[0.8, 0.9, 10.0, 100.0], avgonly=False, modelSelection=False):
 
         # compute global S2 from average correlation functions
-        self.S2avg, self.poptavg, self.pvaravg = self.estimate_extLS_single(self.avgcorr, guess=guess)
+        self.S2avg, self.poptavg, self.pvaravg = self.estimate_extLS_single(self.avgcorr, guess=guess, modelSelection=modelSelection)
  
         if not avgonly:
             self.S2all  = np.zeros([self.corrlist[0].corr.shape[0], len(self.corrlist)], dtype=np.float)
@@ -644,7 +657,7 @@ class OrderParameter(object):
             for c, corrfun in enumerate(self.corrlist):
                 print("\rProgress: {:.0f}%".format(100.0*(c+1)/len(self.corrlist)), end="")
                 sys.stdout.flush()
-                S2, popt, pvar = self.estimate_extLS_single(corrfun, guess=guess)
+                S2, popt, pvar = self.estimate_extLS_single(corrfun, guess=guess, modelSelection=modelSelection)
                 self.S2all[:,c]  = S2
                 self.popt[:,:,c] = popt
                 self.pvar[:,:,c] = pvar
@@ -657,7 +670,7 @@ class OrderParameter(object):
 
 # ==================================== #
 
-    def estimate_extLS_single(self, corrfun, guess=[0.8, 0.9, 10.0, 100.0]):
+    def estimate_extLS_single(self, corrfun, guess=[0.8, 0.9, 10.0, 100.0], modelSelection=False):
 
         dt    = corrfun.dt
         xdata = np.linspace(0, dt*corrfun.corr.shape[1], corrfun.corr.shape[1])
@@ -681,6 +694,7 @@ class OrderParameter(object):
                 counter += 1
                 try:
                     # do the fit without the first point (t=0)
+                    weights = np.linspace(1, 100, xdata.shape[0]-1)
                     popt[n,:], pcov = curve_fit(extLipariSzabo, xdata[1:], corrfun.corr[n,1:], p0=p0)
                     pvar[n,:] = np.diag(pcov)
                     # fit was successful if it didn't raise an error and has proper parameter estimates
@@ -715,15 +729,65 @@ class OrderParameter(object):
                         pvar[n,[0,2,3]] = np.diag(pcov)
                         popt[n,1] = 1.0
                         pvar[n,1] = 0.0
+                        popt[n,2] = 0.0 # to trigger modelSelection
                         #popt[n,:] = float('Nan') * np.ones([len(p0)])
                         #pvar[n,:] = float('Nan') * np.ones([len(p0)])
                         break 
-#            print(n, popt[n,:], pvar[n,:])
+
+
+            if modelSelection:
+                if popt[n,2] < 1.0 or popt[n,2] > 40:
+                    p, cov = curve_fit(n_exp, xdata, corrfun.corr[n,:], p0=[0.9, 1000.0])
+                    popt[n,:] = np.array([p[0],     p[0],     1.0, p[1]    ])
+                    pvar[n,:] = np.array([cov[0,0], cov[0,0], 0.0, cov[1,1]])
+
+
 
         S2 = popt[:,0]
         return S2, popt, pvar
  
+# ==================================== #
 
+    def estimate_CloreLS(self, guess=[0.8, 0.9, 10.0, 100.0, 1000.0]):
+
+        dt    = self.avgcorr.dt
+        xdata = np.linspace(0, dt*self.avgcorr.corr.shape[1], self.avgcorr.corr.shape[1])
+        S2    = np.zeros(self.avgcorr.corr.shape[0])
+        popt  = np.zeros([self.avgcorr.corr.shape[0], len(guess)])
+        pvar  = np.zeros([self.avgcorr.corr.shape[0], len(guess)])
+
+        for n in range(self.avgcorr.corr.shape[0]):
+            res = minimize(CloreLS_obj, x0=guess, args=(xdata, self.avgcorr.corr[n,:]), bounds=((0,1), (0,1), (1,1e4), (1,1e4), (1,1e4)))
+            popt[n,:] = res.x
+
+        # compute global S2 from average correlation functions
+        self.S2avg   = popt[:,0]
+        self.poptavg = popt
+
+# ==================================== #
+
+    def estimate_extCloreLS(self, guess=[0.8, 0.9, 0.95, 10.0, 100.0, 1000.0]):
+
+        dt    = self.avgcorr.dt
+        xdata = np.linspace(0, dt*self.avgcorr.corr.shape[1], self.avgcorr.corr.shape[1])
+        S2    = np.zeros(self.avgcorr.corr.shape[0])
+        popt  = np.zeros([self.avgcorr.corr.shape[0], len(guess)])
+        pvar  = np.zeros([self.avgcorr.corr.shape[0], len(guess)])
+
+
+        #bounds = ((0,1), (0,1), (0,1), (1,100), (1,500), (1,1e4))
+        bounds = ((0,1), (0,1), (0,1), (1,None), (1,None), (1,None))
+        constraints = [{"type": "ineq", "fun":  lambda x: x[1] - x[0]},
+                       {"type": "ineq", "fun":  lambda x: x[2] - x[1]}]
+
+        for n in range(self.avgcorr.corr.shape[0]):
+            res = minimize(extCloreLS_obj, x0=guess, args=(xdata[1:], self.avgcorr.corr[n,1:]), bounds=bounds, constraints=constraints)
+            popt[n,:] = res.x
+
+        # compute global S2 from average correlation functions
+        self.S2avg   = popt[:,0]
+        self.poptavg = popt
+ 
 # ==================================== #
 
     def plot_corr(self, event=None, corrset=None, fit=None):
@@ -778,9 +842,9 @@ class OrderParameter(object):
 #            start_idx = 1
 
         # plot data
-        corrFun     = self.corrlist[self.corrset]
-        xdata       = np.linspace(0, corrFun.corr.shape[1] * corrFun.dt, corrFun.corr.shape[1])  
         if self.plotMean:
+            corrFun     = self.avgcorr
+            xdata       = np.linspace(0, corrFun.corr.shape[1] * corrFun.dt, corrFun.corr.shape[1])    
             self.lines += self.axs.plot(xdata[start_idx:], self.avgcorr.corr[self.corridx,start_idx:], 'b', label="Mean correlation function over {} samples".format(len(self.corrlist)), lw=2)
             #self.lines.append(self.axs.fill_between(xdata[start_idx:], self.avgcorr.corr[self.corridx,start_idx:]+self.avgcorr.std[self.corridx,:],
             #                                               self.avgcorr.corr[self.corridx,start_idx:]-self.avgcorr.std[self.corridx,:],
@@ -790,19 +854,27 @@ class OrderParameter(object):
                                                            alpha=0.4, color='r', label="95% Confidence Interval")) 
 
             try:
-                coeffs = " ".join(["{:.1e}".format(n) for n in self.poptavg[self.corridx,:]])
+                coeffs = ",  ".join(["{:.1f}".format(n) for n in self.poptavg[self.corridx,:]])
             except AttributeError as e:
                 print("Did you forget to fit the data?")
                 raise e
             xdata  = np.linspace(0, corrFun.corr.shape[1] * corrFun.dt, 10*corrFun.corr.shape[1])  
             if self.plotfit in ["single exp", "double exp"]:
-                self.lines += self.axs.plot(xdata[start_idx:], _n_exp(xdata[start_idx:], *self.poptavg[self.corridx,:]), label="fit: {}".format(coeffs), color='g', lw=2)
+                self.lines += self.axs.plot(xdata[start_idx:], n_exp(xdata[start_idx:], *self.poptavg[self.corridx,:]), label="fit: {}".format(coeffs), color='g', lw=2)
             elif self.plotfit == "LS":
                 self.lines += self.axs.plot(xdata[start_idx:], LipariSzabo(xdata[start_idx:], *self.poptavg[self.corridx,:]), label="fit: {}".format(coeffs), color='g', lw=2)
             elif self.plotfit == "extLS":
                 self.lines += self.axs.plot(xdata[start_idx:], extLipariSzabo(xdata[start_idx:], *self.poptavg[self.corridx,:]), label="fit: {}".format(coeffs), color='g', lw=2)
+            elif self.plotfit == "CloreLS":
+                coeffs = ",  ".join(["{:.1f}".format(n) for n in self.poptavg[self.corridx,:]])
+                self.lines += self.axs.plot(xdata[start_idx:], CloreLS(xdata[start_idx:], *self.poptavg[self.corridx,:]), label="fit: {}".format(coeffs), color='g', lw=2) 
+            elif self.plotfit == "extCloreLS":
+                label = r"fit: S$^2$={:.2f},  S$_f$$^2$={:.2f},  S$_i$$^2$={:.2f},  $\tau_f$={:.1f},  $\tau_e$={:.1f},  $\tau_m$={:.1f}".format(*self.poptavg[self.corridx,:])
+                self.lines += self.axs.plot(xdata[start_idx:], extCloreLS(xdata[start_idx:], *self.poptavg[self.corridx,:]), label=label, color='g', lw=2)  
 
         else:
+            corrFun     = self.corrlist[self.corrset]
+            xdata       = np.linspace(0, corrFun.corr.shape[1] * corrFun.dt, corrFun.corr.shape[1])   
             self.lines += self.axs.plot(xdata[start_idx:], corrFun.corr[self.corridx,start_idx:], 'b', lw=2)
             try:
                 coeffs = " ".join(["{:.1e}".format(n) for n in self.poptavg[self.corridx,:]])
@@ -811,27 +883,29 @@ class OrderParameter(object):
                 raise e 
             xdata  = np.linspace(0, corrFun.corr.shape[1] * corrFun.dt, 10*corrFun.corr.shape[1])  
             if self.plotfit in ["single exp", "double exp"]:
-                self.lines += self.axs.plot(xdata[start_idx:], _n_exp(xdata[start_idx:], *self.popt[self.corridx,start_idx:, self.corrset]), label="fit: {}".format(coeffs), color='g', lw=2)
+                self.lines += self.axs.plot(xdata[start_idx:], n_exp(xdata[start_idx:], *self.poptavg[self.corridx,start_idx:, self.corrset]), label="fit: {}".format(coeffs), color='g', lw=2)
             elif self.plotfit == "LS":
-                self.lines += self.axs.plot(xdata[start_idx:], LipariSzabo(xdata[start_idx:], *self.popt[self.corridx,:, self.corrset]), label="fit: {}".format(coeffs), color='g', lw=2)
+                self.lines += self.axs.plot(xdata[start_idx:], LipariSzabo(xdata[start_idx:], *self.poptavg[self.corridx,:, self.corrset]), label="fit: {}".format(coeffs), color='g', lw=2)
             elif self.plotfit == "extLS":
-                self.lines += self.axs.plot(xdata[start_idx:], extLipariSzabo(xdata[start_idx:], *self.popt[self.corridx,:]), label="fit: {}".format(coeffs), color='g', lw=2) 
+                self.lines += self.axs.plot(xdata[start_idx:], extLipariSzabo(xdata[start_idx:], *self.poptavg[self.corridx,:]), label="fit: {}".format(coeffs), color='g', lw=2) 
 
         # set axis limits
         self.axs.set_ylim(min(0, corrFun.corr.min()), max(1, corrFun.corr.max()))
 
         # plot scrollbar
-        xmin, xmax = self.axs.get_xlim()
-        self.lines += self.axs.plot([xmin, xmax], 2*[0.98], 'k', linewidth=2)
-        self.lines += self.axs.plot(xmin + self.corridx*(xmax-xmin)/(corrFun.corr.shape[0]-1), 0.98, 'sk', markersize=15)
+        #xmin, xmax = self.axs.get_xlim()
+        #self.lines += self.axs.plot([xmin, xmax], 2*[0.98], 'k', linewidth=2)
+        #self.lines += self.axs.plot(xmin + self.corridx*(xmax-xmin)/(corrFun.corr.shape[0]-1), 0.98, 'sk', markersize=15)
 
         # annotate plot
-        self.axs.set_title("{} {}".format(corrFun.resname[0][self.corridx], corrFun.resid[0][self.corridx]))
+        self.axs.set_title("{} {} ({}-{})".format(corrFun.resname[0][self.corridx], corrFun.resid[0][self.corridx], corrFun.atomname[0][self.corridx], corrFun.atomname[1][self.corridx]))
         self.axs.set_ylabel("correlation")
         self.axs.set_xlabel("time [ps]")
-        self.axs.legend(loc="lower left")
+        self.axs.legend(loc="upper right")
+        #self.axs.legend(loc="lower left")
 
         self.figure.canvas.draw()
+        plt.savefig("plots/extCloreLS/corr_{:03d}.jpg".format(corrFun.resid[0][self.corridx]), dpi=100, papertype='a5', orientation='landscape', bbox_inches='tight')
         plt.show()
  
 # ==================================== #
@@ -841,7 +915,10 @@ class OrderParameter(object):
             self.leftButtonPressed = True
             try:
                 xmin, xmax = self.axs.get_xlim()
-                ncorr = self.corrlist[self.corrset].corr.shape[0]
+                try:
+                    ncorr = self.corrlist[self.corrset].corr.shape[0]
+                except IndexError:
+                    ncorr = self.avgcorr.corr.shape[0] 
                 self.corridx = int(np.round((ncorr-1) * (event.xdata - xmin) / (xmax - xmin)))
                 if self.corridx < 0:
                     self.corridx = 0
@@ -863,7 +940,10 @@ class OrderParameter(object):
         if self.leftButtonPressed:
             try:
                 xmin, xmax = self.axs.get_xlim()
-                ncorr = self.corrlist[self.corrset].corr.shape[0]
+                try:
+                    ncorr = self.corrlist[self.corrset].corr.shape[0]
+                except IndexError:
+                    ncorr = self.avgcorr.corr.shape[0]
                 self.corridx = int(np.round((ncorr-1) * (event.xdata - xmin) / (xmax - xmin)))
                 if self.corridx < 0:
                     self.corridx = 0
@@ -876,7 +956,10 @@ class OrderParameter(object):
 # ==================================== #
 
     def _onscroll(self, event):
-        ncorr = self.corrlist[self.corrset].corr.shape[0]
+        try:
+            ncorr = self.corrlist[self.corrset].corr.shape[0]
+        except IndexError:
+            ncorr = self.avgcorr.corr.shape[0]
         self.corridx -= int(event.step)
         if self.corridx < 0:
             self.corridx = ncorr - 1
@@ -1587,14 +1670,14 @@ def order_parameter(corrfilenames, method="mean", converged=True, verbose=True, 
 # ============================================================================ #
 
 
-def _n_exp(x, *args):
+def n_exp(x, *args):
     """
     Evaluate the sum of n decaying exponentials depending on the length of *args.
     n coefficients and n exponential decay constants are expected.
     The coefficients are constraint to sum up to 1:
         y = sum_i(ai * exp(x/-ti)) + 1 - sum_i(ai)
     Example call:
-        _n_exp(x, a1, a2, a3, t1, t2, t3)
+        n_exp(x, a1, a2, a3, t1, t2, t3)
     """
     coefficients = args[:len(args)/2]
     decayconst   = args[len(args)/2:]
@@ -1608,6 +1691,24 @@ def _n_exp(x, *args):
     y += 1 - sum(coefficients)
 
     return y
+
+
+# ============================================================================ #
+
+
+def n_exp_obj(p, x, y):
+    """
+    Objective function for least squares minimization for n exponentials.
+
+    Parameters
+    ----------
+    p: Parameters for n_exp
+    x: n_exp(x)
+    y: y = n_exp(x)
+    """
+
+    sumsquares = ((y - n_exp(x, *p))**2).sum()
+    return sumsquares
 
 
 # ============================================================================ #
@@ -1635,4 +1736,441 @@ def extLipariSzabo(t, S2, Sf, te, tm):
  
 
 # ============================================================================ #
+
+def CloreLS(t, S2, Sf, tf, ts, tm):
+    """
+    CloreLS model from:
+    Clore, M.; Szabo, A.; et al.
+    Deviations from the Simple Two-Parameter Model-Free Approach to the Interpretation of Nitrogen-15 Nuclear Magnetic Relaxation of Proteins.
+    J. Am. Chem. Soc. 1990.
+    """
+
+    C_I = S2 + (1-Sf)*np.exp(-t/tf) + (Sf-S2)*np.exp(-t/ts)
+    C   = np.exp(-t/tm) * C_I 
+
+    return C
+
+# ============================================================================ #
+
+def CloreLS_obj(p, t, C):
+    """
+    Objective function for CloreLS least squares fit
+    
+    Parameters
+    ----------
+    p : sequence
+        Parameters for CloreLS model
+    t : (N,) array
+        Time sequence
+    C : (N,) array
+        Correlation function
+    """
+    sumsquares = ((C - CloreLS(t, *p))**2).sum()
+    return sumsquares
+
+# ============================================================================ #
  
+def extCloreLS(t, S2, Sf, Si, tf, ts, tm, motionAveraged=False):
+    """
+    extends the CloreLS model by a immediate component, Si, that is quicker than the fast component:
+    Clore, M.; Szabo, A.; et al.
+    Deviations from the Simple Two-Parameter Model-Free Approach to the Interpretation of Nitrogen-15 Nuclear Magnetic Relaxation of Proteins.
+    J. Am. Chem. Soc. 1990.
+
+    motionAveraged: Only use the motionally averaged model
+    """
+
+    C_I = S2 + (Si-Sf)*np.exp(-t/tf) + (Sf-S2)*np.exp(-t/ts)
+
+    if motionAveraged:
+        return C_I
+    else:
+        C   = np.exp(-t/tm) * C_I 
+        return C
+ 
+# ============================================================================ #
+
+def extCloreLS_obj(p, t, C, motionAveraged=False):
+    """
+    Objective function for extCloreLS least squares fit
+    
+    Parameters
+    ----------
+    p : sequence
+        Parameters for extCloreLS model
+    t : (N,) array
+        Time sequence
+    C : (N,) array
+        Correlation function
+    """
+    sumsquares = ((C - extCloreLS(t, *p))**2).sum()
+    return sumsquares
+
+# ============================================================================ #
+
+def generalLS(t, S, tau, Sf=1.0, tm=float('inf')):
+    """
+    Generalization of the Lipari Szabo model for Bond vector correlation function fits.
+
+    Parameters
+    ----------
+    t : (N,) array
+        timeseries array
+    S : (M,) array
+        S2 and all other decay coefficients to use in the model.
+    tau: (M,) array]
+        decay time constants
+    Sf : float, default 1.0
+        initial decay before first data point
+    tm : float, default 'inf'
+        global rotation decay time constant.
+        Set to float('inf') for internal motion only (default).
+
+    Retruns
+    -------
+    C : (N,) array
+        Correlation function estimates for fitting
+    """
+
+#    print('S:  ', S)
+#    print('tau:', tau)
+#    print('Sf: ', Sf)
+#    print('tm: ', tm)
+#    print(' ')
+
+    S_ = list(S) + [Sf]
+
+    #C_I = S0 + (S1-S0)*np.exp(-t/t0) + (S2-S1)*np.exp(-t/t1) + ...
+    #    = S0 + sum_i [(Si+1 - Si)*np.exp(-t/ti)]
+
+    C_I = S_[0]
+    for i, taui in enumerate(tau):
+        C_I += (S_[i+1] - S_[i]) * np.exp(-t/taui)
+
+    C = C_I * np.exp(-t/tm)
+
+    return C
+
+# ============================================================================ #
+ 
+#def generalLS_obj(p, t, C, sigma=None, fast=False, internal=False):
+#    """
+#    Objective function for least squares minimization of 
+#    generalization of the Lipari Szabo model for Bond vector correlation function fits.
+#
+#    Parameters
+#    ----------
+#    p : (N,) array
+#        generalLS parameters: [S0, .., Sn, (Sf), t1, .. tn, (tm)]
+#        shape: (N,), with N = 2*n + 1 (+1) (+1)
+#        Sf is only present if fast     == True
+#        tm is only present if internal == True
+#    t : (M,) array
+#        time series
+#    C : (M,) array
+#        True correlation function values
+#    sigma : (M,) array, optional
+#        Optionally variances of the correlation function for weighting
+#    fast : float, optional
+#        If True, p contains an Sf parameter without decay constant describing decay before the first datapoint
+#        Minimization should then be done without the first datapoint C(t=0.0) = 1.0
+#    internal : float, optional
+#        If False, p contains a tm decay constant accounting for global rotations.
+#
+#    Returns
+#    -------
+#    sumsqurares : float
+#        Sum of squares of correlation function deviations from the model with the current parameters.
+#        (optinally weighted by variances)
+#    """
+#
+#    if fast and not internal:
+#        # len(p) = 2*n + 1 + 2
+#        n   = (len(p) - 3) / 2
+#        tau = p[n+2:-1]
+#        Sf  = p[n+1]
+#        tm  = p[-1]
+#    elif fast and internal:
+#        # len(p) = 2*n + 1 + 1
+#        n   = (len(p) - 2) / 2
+#        tau = p[n+2:] 
+#        Sf  = p[n+1]
+#        tm  = float('inf')
+#    elif not fast and not internal:
+#        n   = (len(p) - 2) / 2
+#        tau = p[n+1:-1]  
+#        Sf  = 1.0
+#        tm  = p[-1]
+#    elif not fast and internal:
+#        n   = (len(p) - 1) / 2
+#        tau = p[n+1:]  
+#        Sf  = 1.0
+#        tm  = float('inf')
+#
+#    S = p[:n+1]
+#
+#    if sigma is None:
+#        sigma = np.ones_like(C)
+#
+#    print('S:  ', S)
+#    print('tau:', tau)
+#    print('Sf: ', Sf)
+#    print('tm: ', tm)
+#    print('')
+#
+#    sumsquares = ((generalLS(t, S, tau, Sf=Sf, tm=tm) - C)**2 / sigma).sum()
+#    return sumsquares
+#
+## ============================================================================ #
+#
+#def generalLS_fit(t, C, p, n, sigma=None, fast=False, internal=False):
+#    """
+#    Least squares fit of the
+#    generalization of the Lipari Szabo model for Bond vector correlation function fits.
+#    """
+#
+##    # initial parameter values
+##    p = list(np.linspace(0.1,0.9,n+1))
+##    if fast:
+##        p += [0.95]
+##    p += n*[1.0]
+##    if not internal:
+##        p += [1.0]
+#
+#    # bounds
+#    bounds = (n+1)*[(0,1)]
+#    if fast:
+#        bounds += [(0,1)]
+#    bounds += n*[(0,None)]
+#    if not internal:
+#        bounds += [(0,None)]
+#
+#    # constraints
+#    constraints = []
+#    for i in range(n):
+#        constraints += [{"type": "ineq", "fun":  lambda x: x[i+1] - x[i]}]
+#    if fast:
+#        constraints += [{"type": "ineq", "fun":  lambda x: x[n+1] - x[n]}]
+#    
+##    print('p:', p)
+##    print('bounds:', bounds)
+##    print('const.:', constraints)
+##    print('')
+##    generalLS_obj(p, t, C, sigma=sigma, fast=fast, internal=internal)
+#    res = minimize(generalLS_obj, x0=p, args=(t, C, sigma, fast, internal), bounds=bounds, constraints=constraints)
+#
+#    S = res.x[:n+1]
+#    Sf = 1.0
+#    tm = float('inf')
+#    if fast:
+#        Sf = res.x[n+1]
+#        if not internal:
+#            tau = res.x[n+2:-1]
+#            tm  = res.x[-1]
+#        else:
+#            tau = res.x[n+2:]
+#    else:
+#        if not internal:
+#            tau = res.x[n+1:-1]
+#            tm  = res.x[-1]
+#        else:
+#            tau = res.x[n+1:]
+#    return (S, tau, Sf, tm)
+
+
+# ============================================================================ #
+
+def generalLS_I_obj(p, t, C, sigma=None):
+    """
+    Objective function for general Lipari Szabo model least squares fit.
+    Internal, no Sf
+
+    Parameters
+    ----------
+    p : (N,) array
+        Lipari Szabo parameters
+    t : (M,) array
+        Timeseries
+    C : (M,) array
+        Correlation function values
+    sigma : (M,) array
+        variances for weighted least squares fit
+    """
+
+    n   = len(p) / 2
+    S   = p[:n]
+    tau = p[n:]
+
+    variances = sigma
+    if sigma is None:
+        variances = np.ones_like(C)
+
+    sumsquares  = ((generalLS(t, S, tau, Sf=1.0, tm=float('inf')) - C)**2 / variances).sum()
+    return sumsquares
+
+# ============================================================================ #
+
+def generalLS_I_Sf_obj(p, t, C, sigma=None):
+    """
+    Objective function for general Lipari Szabo model least squares fit.
+    Internal, Sf
+
+    Parameters
+    ----------
+    p : (N,) array
+        Lipari Szabo parameters
+    t : (M,) array
+        Timeseries
+    C : (M,) array
+        Correlation function values
+    sigma : (M,) array
+        variances for weighted least squares fit
+    """
+
+    n   = len(p) / 2
+    S   = p[:n]
+    tau = p[n:]
+    Sf  = p[-1]
+
+    variances = sigma
+    if sigma is None:
+        variances = np.ones_like(C)
+
+    sumsquares  = ((generalLS(t, S, tau, Sf=Sf, tm=float('inf')) - C)**2 / variances).sum()
+    return sumsquares
+ 
+# ============================================================================ #
+
+def generalLS_Sf_obj(p, t, C, sigma=None):
+    """
+    Objective function for general Lipari Szabo model least squares fit.
+    global, Sf
+
+    Parameters
+    ----------
+    p : (N,) array
+        Lipari Szabo parameters
+    t : (M,) array
+        Timeseries
+    C : (M,) array
+        Correlation function values
+    sigma : (M,) array
+        variances for weighted least squares fit
+    """
+
+    n   = (len(p)-2) / 2
+    S   = p[:n]
+    tau = p[n:]
+    Sf  = p[-1]
+    tm  = p[-2]
+
+    variances = sigma
+    if sigma is None:
+        variances = np.ones_like(C)
+
+    sumsquares  = ((generalLS(t, S, tau, Sf=Sf, tm=tm) - C)**2 / variances).sum()
+    return sumsquares
+ 
+# ============================================================================ #
+
+def generalLS_obj(p, t, C, sigma=None):
+    """
+    Objective function for general Lipari Szabo model least squares fit.
+    global, no Sf
+
+    Parameters
+    ----------
+    p : (N,) array
+        Lipari Szabo parameters
+    t : (M,) array
+        Timeseries
+    C : (M,) array
+        Correlation function values
+    sigma : (M,) array
+        variances for weighted least squares fit
+    """
+
+    n   = len(p) / 2
+    S   = p[:n]
+    tau = p[n:]
+    tm  = p[-1]
+
+    variances = sigma
+    if sigma is None:
+        variances = np.ones_like(C)
+
+    sumsquares  = ((generalLS(t, S, tau, Sf=1.0, tm=tm) - C)**2 / variances).sum()
+    return sumsquares
+ 
+
+# ============================================================================ #
+
+def generalLS_I_fit(t, C, n, sigma=None, fast=False, internal=False):
+    """
+    Fit the internal general Lipari Szabo model with a sum of n exponentials.
+
+    Parameters
+    ----------
+    t : (N, ) array
+        timeseries
+    C : (N, ) array
+        correlation function values
+    n : int
+        Number of exponentials for fit
+    sigma : (N, ) array, optional
+        Variances for least squares fit weighting
+    fast : bool, optional
+        Include a parameter for fast decay before the first datapoint.
+        Omit first correlation function datapoint equalint 1.0
+    internal : bool, optional
+        Only consider internal bond vector motions
+
+    Returns
+    -------
+    p : dict
+        Dictionary containing all optimized parameters for generalLS()
+    """
+
+    # initialize parameter guesses
+    p0  = list(np.linspace(0.1, 0.9, n)) # S
+    p0 +=  n * [1.0]                     # tau
+    if fast:
+        p0 += [1.0]                      # Sf
+    if not internal:                     # tm
+        p0 += [1.0]
+
+    # set bounds
+    bounds  = n * [(0, 1)]    # S
+    bounds += n * [(0, None)] # tau
+    if fast:
+        bounds += [(0, 1)]    # Sf
+    if not internal:
+        bounds += [(0, None)] # tm
+    bounds = tuple(bounds)
+
+    # set constraints
+    constraints = []
+    for i in range(n-1):
+        constraints += [{"type": "ineq", "fun":  lambda x: x[i+1] - x[i]}]
+    if fast:
+        i = n-1
+        constraints += [{"type": "ineq", "fun":  lambda x: x[i+1] - x[i]}]
+
+    if not fast and internal:
+        res = minimize(generalLS_I_obj,    x0=p0, args=(t, C, sigma), bounds=bounds, constraints=constraints)
+    elif not fast and not internal:
+        res = minimize(generalLS_obj,      x0=p0, args=(t, C, sigma), bounds=bounds, constraints=constraints)
+    elif fast and internal:
+        res = minimize(generalLS_I_Sf_obj, x0=p0, args=(t, C, sigma), bounds=bounds, constraints=constraints)
+    elif fast and not inernal:
+        res = minimize(generalLS_Sf_obj,   x0=p0, args=(t, C, sigma), bounds=bounds, constraints=constraints)
+
+    p =  {'S': res.x[:n], 'tau': res.x[n:], 'Sf': 1.0, 'tm': float('inf')}
+    if fast:
+        p['Sf'] = res.x[2*n]
+    if not internal:
+        p['tm'] = res.x[2*n+1]
+    return p
+
+# ============================================================================ #
+
