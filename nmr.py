@@ -1502,11 +1502,12 @@ def bondvec_corr_batch_mpi(topfilename, trjfilenames, savepath, subtrjlength=Non
         for ntrj, trj in enumerate(mdtraj.iterload(trjfilename, top=task['topfilename'], chunk=chunksize)):
 #            if ntrj > 3:
 #                break
+
             tc['loadtimer'] += time.time() - loadstarttime
-            tc['nsubtrjs' ] += 1
 
             if trj.n_frames == chunksize:
-                tc['nframes'] += trj.n_frames
+                tc['nsubtrjs' ] += 1
+                tc['nframes']   += trj.n_frames
 
                 saveinfo = {}
                 saveinfo['topfilename'] = task['topfilename']
@@ -1529,7 +1530,8 @@ def bondvec_corr_batch_mpi(topfilename, trjfilenames, savepath, subtrjlength=Non
                 print(".", end="")
                 sys.stdout.flush()
 
-    print("")
+    if myrank == root:
+        print("")
 
 
     # report timers and counters to root
