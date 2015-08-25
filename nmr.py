@@ -905,7 +905,7 @@ class OrderParameter(object):
         #self.axs.legend(loc="lower left")
 
         self.figure.canvas.draw()
-        plt.savefig("plots/extCloreLS/corr_{:03d}.jpg".format(corrFun.resid[0][self.corridx]), dpi=100, papertype='a5', orientation='landscape', bbox_inches='tight')
+        #plt.savefig("plots/extCloreLS/corr_{:03d}.jpg".format(corrFun.resid[0][self.corridx]), dpi=100, papertype='a5', orientation='landscape', bbox_inches='tight')
         plt.show()
  
 # ==================================== #
