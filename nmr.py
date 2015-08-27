@@ -2031,7 +2031,7 @@ def generalLS_I_Sf_obj(p, t, C, sigma=None):
 
     n   = len(p) / 2
     S   = p[:n]
-    tau = p[n:]
+    tau = p[n:2*n]
     Sf  = p[-1]
 
     variances = sigma
@@ -2060,9 +2060,11 @@ def generalLS_Sf_obj(p, t, C, sigma=None):
         variances for weighted least squares fit
     """
 
+    print(p)
+
     n   = (len(p)-2) / 2
     S   = p[:n]
-    tau = p[n:]
+    tau = p[n:2*n]
     Sf  = p[-1]
     tm  = p[-2]
 
@@ -2094,7 +2096,7 @@ def generalLS_obj(p, t, C, sigma=None):
 
     n   = len(p) / 2
     S   = p[:n]
-    tau = p[n:]
+    tau = p[n:2*n]
     tm  = p[-1]
 
     variances = sigma
@@ -2107,9 +2109,9 @@ def generalLS_obj(p, t, C, sigma=None):
 
 # ============================================================================ #
 
-def generalLS_I_fit(t, C, n, sigma=None, fast=False, internal=False):
+def generalLS_fit(t, C, n, sigma=None, fast=False, internal=False):
     """
-    Fit the internal general Lipari Szabo model with a sum of n exponentials.
+    Fit the general Lipari Szabo model with a sum of n exponentials.
 
     Parameters
     ----------
@@ -2134,12 +2136,12 @@ def generalLS_I_fit(t, C, n, sigma=None, fast=False, internal=False):
     """
 
     # initialize parameter guesses
-    p0  = list(np.linspace(0.1, 0.9, n)) # S
-    p0 +=  n * [1.0]                     # tau
+    p0  = list(np.linspace(0.1, 0.9, n))     # S
+    p0 += list(np.logspace(1, n, n, base=10)) # tau
     if fast:
-        p0 += [1.0]                      # Sf
-    if not internal:                     # tm
-        p0 += [1.0]
+        p0 += [0.95]                         # Sf
+    if not internal:                         # tm
+        p0 += [10.0**n]
 
     # set bounds
     bounds  = n * [(0, 1)]    # S
@@ -2153,25 +2155,36 @@ def generalLS_I_fit(t, C, n, sigma=None, fast=False, internal=False):
     # set constraints
     constraints = []
     for i in range(n-1):
-        constraints += [{"type": "ineq", "fun":  lambda x: x[i+1] - x[i]}]
+        constraints += [{"type": "ineq", "fun":  lambda x: x[i+1] - x[i]}]    # Si+1 > Si
+        print (i+1, ">", i)
     if fast:
-        i = n-1
-        constraints += [{"type": "ineq", "fun":  lambda x: x[i+1] - x[i]}]
+        constraints += [{"type": "ineq", "fun":  lambda x: x[2*n] - x[n-1]}]  # Sf > Sn-1
+        print (2*n, ">", n-1)
+    for i in range(n,2*n-1):
+        constraints += [{"type": "ineq", "fun":  lambda x: x[i+1] - x[i]}]    # tau_{i+1} > tau_{i}
+        print (i+1, ">", i)
+    if not internal:
+        constraints += [{"type": "ineq", "fun":  lambda x: x[-1] - x[2*n-1]}] # tau_{m} > tau_{2*n-1}
+        print (-1, ">", 2*n-1)
 
+    print(p0)
+    print(bounds)
+
+    # minimize objective function
     if not fast and internal:
         res = minimize(generalLS_I_obj,    x0=p0, args=(t, C, sigma), bounds=bounds, constraints=constraints)
     elif not fast and not internal:
         res = minimize(generalLS_obj,      x0=p0, args=(t, C, sigma), bounds=bounds, constraints=constraints)
     elif fast and internal:
         res = minimize(generalLS_I_Sf_obj, x0=p0, args=(t, C, sigma), bounds=bounds, constraints=constraints)
-    elif fast and not inernal:
+    elif fast and not internal:
         res = minimize(generalLS_Sf_obj,   x0=p0, args=(t, C, sigma), bounds=bounds, constraints=constraints)
 
-    p =  {'S': res.x[:n], 'tau': res.x[n:], 'Sf': 1.0, 'tm': float('inf')}
+    p =  {'S': res.x[:n], 'tau': res.x[n:2*n], 'Sf': 1.0, 'tm': float('inf')}
     if fast:
-        p['Sf'] = res.x[2*n]
+        p['Sf'] = res.x[-2]
     if not internal:
-        p['tm'] = res.x[2*n+1]
+        p['tm'] = res.x[-1]
     return p
 
 # ============================================================================ #
