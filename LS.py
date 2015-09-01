@@ -36,9 +36,11 @@ class LS(object):
 
     # ================================ #
 
-    def fit(self, n, fast=True, internal=False):
+    def fit(self, n, fast=True, internal=False, taum=None):
         """
         Fit the data and return optimal parameters
+
+        taum sets a fixed global rotation time
         """
 
         nS   = n
@@ -50,6 +52,7 @@ class LS(object):
         # set initial parameters
         p0  = list(np.linspace(0.1, 0.9, nS))
         p0 += ntau*[1.0]
+        #p0 += list(np.logspace(0, ntau-1, ntau))
 
         # set bounds on parameters
         bounds  = nS   * [(0,1)]    # S
@@ -67,6 +70,12 @@ class LS(object):
         # if not fast, constrain Sf to 1.0
         if not fast:
             constraints += [{"type": "ineq", "fun":  lambda x,i=nS: x[i-1] - 1.0}] # constrain Sf to 1.0
+#        else:
+#            constraints += [{"type": "ineq", "fun":  lambda x,i=nS: x[i-1] - self.C[0]}] # constrain Sf to first datapoint
+
+        if not internal and taum is not None:
+            constraints += [{"type": "ineq", "fun":  lambda x,: x[-1] - taum}] # constrain taum to user provided value
+
 
         # fit
         res = minimize(self.generalLS_obj, x0=p0, bounds=bounds, constraints=constraints)
