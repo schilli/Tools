@@ -297,9 +297,9 @@ class OrderParameter(object):
             self.S2std   = np.zeros(self.S2all.shape[0])
             self.S2error = np.zeros(self.S2all.shape[0])
             for n in range(self.S2all.shape[0]):
-                self.S2mean[n]  = self.S2all[:,self.S2convergence[n,:]].mean()
-                self.S2std[n]   = self.S2all[:,self.S2convergence[n,:]].std()
-                self.S2error[n] = self.S2std[n] / self.S2convergence[n,:].sum()
+                self.S2mean[n]  = self.S2all[n,self.S2convergence[n,:]].mean()
+                self.S2std[n]   = self.S2all[n,self.S2convergence[n,:]].std()
+                self.S2error[n] = self.S2std[n] / self.S2convergence[n,:].sum()**0.5
 
         self.S2nconverged = self.S2convergence.sum(1)
 
@@ -348,12 +348,28 @@ class OrderParameter(object):
         self.S2   = np.zeros([ncorr, n])
         self.tau  = np.zeros([ncorr, n])
 
+#        nS   = n
+#        ntau = n 
+#        startvals  = []
+#        startvals.append(2*n*[1.0])
+#        startvals.append(list(np.linspace(0.1, 0.9, nS)) + ntau*[1.0])
+#        startvals.append(nS*[1.0] + list(np.logspace(0, ntau-1, ntau))[-1::-1])
+#        startvals.append(list(np.linspace(0.1, 0.9, nS)) + list(np.logspace(0, ntau-1, ntau))[-1::-1])
+#        self.lsq = np.zeros([ncorr, len(startvals)])
+
         for nc in range(ncorr):
             if weighted:
                 self.ls = LS.LS(t[firstf:], self.avgcorr.corr[nc,firstf:], sigma=self.avgcorr.std[nc,firstf:])
             else:
                 self.ls = LS.LS(t[firstf:], self.avgcorr.corr[nc,firstf:])
-            p       = self.ls.fit(n, fast=fast, internal=internal, **kwargs)
+            p = self.ls.fit(n, fast=fast, internal=internal, **kwargs)
+
+#            for i, p0 in enumerate(startvals):
+#                p = self.ls.fit(n, fast=fast, internal=internal, p0=p0, **kwargs)
+#                self.lsq[nc,i] = p["lsq"]
+#
+#            print("{:3d} done".format(nc))
+
             self.para.append(p)
             self.S2[nc,:]  = p["S"]
             self.tau[nc,:] = p["tau"]
@@ -366,23 +382,29 @@ class OrderParameter(object):
         """
         overfitted = False
 
+        if not parameters['success']:
+            return True
+
         if len(parameters['tau']) > 1:
-            minratio = min(parameters['tau'][1:] / parameters['tau'][:-1])
+            minratio = min(parameters['tau'][:-1] / parameters['tau'][1:])
             if minratio < mintauratio:
                 overfitted = True
 #                print("tau overfitted:", parameters['tau'])
 
         if len(parameters['S']) > 1:
-            mindiff = min(abs(parameters['S'][1:] - parameters['S'][:-1]))
+            mindiff = min(abs(parameters['S'][:-1] - parameters['S'][1:]))
             if mindiff < minS2diff:
                 overfitted = True
 #                print("S overfitted:", parameters['S'])
+
+        if np.isnan(parameters['p']).sum() > 0:
+            overfitted = True
 
         return overfitted
 
 # ==================================== #
 
-    def estimate_generalLS_modelSelection(self, fast=True, internal=False, weighted=False, **kwargs):
+    def estimate_generalLS_modelSelection(self, fast=True, internal=False, weighted=False, maxdecays=float('inf'), **kwargs):
 
         dt      = self.avgcorr.dt
         ncorr   = self.avgcorr.corr.shape[0]
@@ -393,7 +415,7 @@ class OrderParameter(object):
             firstf = 1
 
         self.para = []
-        maxdecays = 1
+        totaldecays = 1 # maximum number of decays with successful fit
 
         for nc in range(ncorr):
             if weighted:
@@ -401,28 +423,46 @@ class OrderParameter(object):
             else:
                 self.ls = LS.LS(t[firstf:], self.avgcorr.corr[nc,firstf:]) 
 
-            ndecays    = 0
-            overfitted = False
-            while not overfitted:
-                ndecays += 1
-#                print(ndecays)
+            parameters = []
+            for ndecays in range(1,maxdecays+1):
                 p = self.ls.fit(ndecays, fast=fast, internal=internal, **kwargs)
                 overfitted = self.check_overfitting(p)
+                if not overfitted:
+                    p["ndecays"] = ndecays
+                    parameters.append(p)
 
-            ndecays -= 1
-            maxdecays = max(maxdecays, ndecays)
-#            print("{:3d}".format(ndecays), ndecays * "=")
-            p = self.ls.fit(ndecays, fast=fast, internal=internal, **kwargs)
+            try:
+                p = parameters[-1]
+            except IndexError:
+                print("Failed to fit correlation function {} ({} {})".format(nc, self.avgcorr.resname[0][nc], self.avgcorr.resid[0][nc]))
+                p = self.ls.fit(1, fast=fast, internal=internal, **kwargs)
+                p["ndecays"] = 1
             self.para.append(p)
+            totaldecays = max(totaldecays, p["ndecays"])
+            
 
-        self.S2   = np.zeros([ncorr, maxdecays])
-        self.tau  = np.zeros([ncorr, maxdecays]) 
+
+#            ndecays    = 0
+#            overfitted = False
+#            while (not overfitted) and (ndecays < maxdecays):
+#                ndecays += 1
+#                p = self.ls.fit(ndecays, fast=fast, internal=internal, **kwargs)
+#                overfitted = self.check_overfitting(p)
+#
+#            if overfitted:
+#                ndecays -= 1
+#                p = self.ls.fit(ndecays, fast=fast, internal=internal, **kwargs)
+#            totaldecays = max(totaldecays, ndecays)
+#            print("{:3d}".format(ndecays), ndecays * "=")
+#            self.para.append(p)
+
+        self.S2   = np.zeros([ncorr, totaldecays])
+        self.tau  = np.zeros([ncorr, totaldecays]) 
         for nc in range(ncorr):
             p = self.para[nc]
             ndecays = len(p["S"])
-            self.S2[nc,:ndecays]    = p["S"]
-            self.tau[nc,:ndecays-1] = p["tau"][:-1]
-            self.tau[nc,-1]         = p["tau"][-1]
+            self.S2[nc,:ndecays]  = p["S"]
+            self.tau[nc,:ndecays] = p["tau"]
  
 
 # ==================================== #
