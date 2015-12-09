@@ -601,14 +601,15 @@ class MCtrj(md.Trajectory):
         trj.save_pdb(tmppdb)
 
         # launch Crysol to compute SAXS fit
-        crysol_cmd  = ["crysol", tmppdb, saxsfilename, "-cst", "-err", "-p {}".format(crysol_prefix)]
+        crysol_cmd  = ["crysol", tmppdb, saxsfilename, "-cst", "-err", "-p", "{}".format(crysol_prefix)]
         if verbose:
             print(' '.join(crysol_cmd))
         with open(crysol_outfile, 'w') as of:
             subprocess.call(crysol_cmd, stdout=of, shell=False)
 
         # read chi**2
-        with open(crysol_prefix + "-100.fit", 'r') as f:
+        fitfile = glob.glob(crysol_prefix + '*.fit')[0]
+        with open(fitfile, 'r') as f:
             data = f.readline()
             try:
                 chi2 = float(data.split(':')[-1])
