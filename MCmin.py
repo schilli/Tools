@@ -333,7 +333,7 @@ class MCtrj(md.Trajectory):
         self.xyz[self.MC_step_counter,:,:] = self.xyz[self.MC_step_counter-1,:,:]
         for move in self.MC_moves:
             move.move(self.xyz[self.MC_step_counter,:,:])
-#        print(np.linalg.norm(self.xyz[self.MC_step_counter,:,:] - self.xyz[self.MC_step_counter-1,:,:]))
+        self.superpose_chains()
         self.timer_MC_moves += time.time() - st
 
         # minimize energy
@@ -388,6 +388,36 @@ class MCtrj(md.Trajectory):
             self.MC_step_counter -= 1
 
         return success
+
+
+
+    def superpose_chains(self):
+        """
+        Superimpose each chain on the previous frame
+        """
+        frame_indices = np.arange(2) + self.MC_step_counter - 1
+        try:
+            last2frames = self.slice(frame_indices, copy=False)
+        except UnboundLocalError as e:
+            print("There is a bug in trajectory.slice(). A pull request as already been submitted.") 
+            sys.exit(1)
+
+        for chain in self.top.chains:
+            atom_indices = self.top.select("chainid {}".format(chain.index))
+            thischain    = last2frames.atom_slice(atom_indices, inplace=False)
+            thischain.superpose(thischain, frame=0, parallel=False)
+            self.xyz[self.MC_step_counter, atom_indices, :] = thischain.xyz[-1,:,:]
+
+
+#        for chain in self.top.chains:
+#            atom_indices = self.top.select("chainid {}".format(chain.index))
+#            try:
+#                thisframe    = self.slice(self.MC_step_counter, copy=False)
+#            except UnboundLocalError as e:
+#                print("There is a bug in trajectory.slice(). A pull request as already been submitted.")
+#            thisframe.superpose(self, frame=self.MC_step_counter-1, atom_indices=atom_indices, parallel=False)
+#            thischain.
+#            break
 
 
 
@@ -783,15 +813,16 @@ class MC_ramachandran_move(MC_move):
         self.atom2 = dihedral_atom_indices[self.angle_ndx,[self.topology.atom(a).name for a in dihedral_atom_indices[self.angle_ndx,:]].index(atom2_name)]
 
         self.residue = self.topology.atom(self.atom1).residue
+        chainid      = self.residue.chain.index
 
         # determine atoms to rotate
         selection_texts = []
         if self.kind == 'phi':
-            selection_texts.append("resid {} and (sidechain or name C or name O) and not name H".format(self.residue.index))
-            selection_texts.append("resid > {}".format(self.residue.index))
+            selection_texts.append("resid {} and (sidechain or name C or name O) and not name H and chainid {}".format(self.residue.index, chainid))
+            selection_texts.append("resid > {} and chainid {}".format(self.residue.index, chainid))
         elif self.kind == 'psi':
-            selection_texts.append("resid {} and name O".format(self.residue.index))
-            selection_texts.append("resid > {}".format(self.residue.index))
+            selection_texts.append("resid {} and name O and chainid {}".format(self.residue.index, chainid))
+            selection_texts.append("resid > {} and chainid".format(self.residue.index))
  
         self.rotation_atoms = []
         for text in selection_texts:
