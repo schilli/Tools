@@ -1214,7 +1214,7 @@ def bondvec_corr_batch_mpi(topfilename, trjfilenames, savepath, subtrjlength=Non
             task['savepath']     = savepath
 
             print("Sending task to rank ", rank)
-            print(taks)
+            print(task)
             comm.send(task, dest=rank, tag=rank)
 
     print("Done with sending, receiving")
