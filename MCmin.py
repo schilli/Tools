@@ -49,6 +49,7 @@ class MCtrj(md.Trajectory):
         self.MC_attempt_counter        = 0         # counts the number of attempted MC moves
         self.MC_step_counter           = 0         # counts the number of accepted MC
         self.MC_moves                  = []        # holding all the MC moves
+        self.superpose_indices         = None      # atoms used for superposition
         self.resids                    = np.array([r.resSeq for r in self.top.residues], dtype=np.int)
         self.reporters                 = []
 
@@ -220,7 +221,7 @@ class MCtrj(md.Trajectory):
 
 
 
-    def MC_run(self, nsteps=None, nattempts=None, verbose=False, **kwargs):
+    def MC_run(self, nsteps=None, nattempts=None, verbose=False, superpose_indices=None, **kwargs):
         """
         Run a monte carlo simulation
 
@@ -230,6 +231,8 @@ class MCtrj(md.Trajectory):
         nattempts (int):                        number of monte calro attempts to try (overrides nsteps)
         kwargs:                                 keyword arguments passed on to MC_step()
         """
+
+        self.superpose_indices = superpose_indices
 
         if not self.MC_is_set_up:
             self.MC_setup(**kwargs)
@@ -242,8 +245,8 @@ class MCtrj(md.Trajectory):
         self.timer_metropolis = 0.0
         starttime             = time.time()
 
-        properties  = ["step", "attempt", "Etot (kJ/mol)", "E_SAXS (kJ/mol)", "Epot (kJ/mol)", "dEtot (kJ/mol)", "dE_SAXS (kJ/mol)", "dEpot (kJ/mol)", "ap", "accepted"]
-        fieldwidths = [     8,         8,              14,                14,              14,               14,                 14,               14,   14,          8]
+        properties  = ["step", "attempt", "Etot (kJ/mol)", "E_SAXS (kJ/mol)", "Epot (kJ/mol)", "dEtot (kJ/mol)", "dE_SAXS (kJ/mol)", "dEpot (kJ/mol)", "SAXS chi^2", "ap", "accepted"]
+        fieldwidths = [     8,         8,              14,                15,              14,               14,                 16,               14,           14,   14,          8]
         self.reporters = []
         filereporter = StateReporter(properties=properties, fieldwidths=fieldwidths, outfile=self.logfilename)
         self.reporters.append(filereporter)
@@ -333,7 +336,8 @@ class MCtrj(md.Trajectory):
         self.xyz[self.MC_step_counter,:,:] = self.xyz[self.MC_step_counter-1,:,:]
         for move in self.MC_moves:
             move.move(self.xyz[self.MC_step_counter,:,:])
-        self.superpose_chains()
+        #self.superpose_chains()
+        self.superpose_atoms(frame=0)
         self.timer_MC_moves += time.time() - st
 
         # minimize energy
@@ -379,6 +383,7 @@ class MCtrj(md.Trajectory):
                 "dEtot (kJ/mol)":   Etot - Etot_prev,
                 "dE_SAXS (kJ/mol)": self.E_SAXS[self.MC_step_counter] - self.E_SAXS[self.MC_step_counter-1],
                 "dEpot (kJ/mol)":   deltaE.value_in_unit(deltaE.unit),
+                "SAXS chi^2":       self.SAXS_chi2[self.MC_step_counter],
                 "ap":               acceptance_probability,
                 "accepted":         accepted}
         for reporter in self.reporters:
@@ -388,6 +393,15 @@ class MCtrj(md.Trajectory):
             self.MC_step_counter -= 1
 
         return success
+
+
+
+    def superpose_atoms(self, frame=0):
+        """
+        Superpose on the atoms specified in self.superpose_indices of the given frame
+        """
+        if self.superpose_indices is not None:
+            self.superpose(self, frame=frame, atom_indices=self.superpose_indices, parallel=False)
 
 
 
