@@ -1205,7 +1205,7 @@ def bondvec_corr_batch_mpi(topfilename, trjfilenames, savepath, subtrjlength=Non
         ntasksperrank = np.array(nranks * [ntasks / nranks], dtype=np.int)
         ntasksperrank[:ntasks%nranks] += 1
 
-        for rank in range(0, nranks):
+        for rank in range(1, nranks):
             taskstaken = sum(ntasksperrank[:rank])
             task = {}
             task['topfilename']  = topfilename
@@ -1214,14 +1214,24 @@ def bondvec_corr_batch_mpi(topfilename, trjfilenames, savepath, subtrjlength=Non
             task['savepath']     = savepath
 
             print("Sending task to rank ", rank)
-            #print(task)
-            comm.Isend(task, dest=rank, tag=rank)
+            comm.send(task, dest=rank, tag=rank)
 
         print("Done with sending, receiving")
-    task = comm.recv(source=root, tag=myrank)
+
+    if myrank != root:
+        task = comm.recv(source=root, tag=myrank)
+    else:
+        rank = myrank
+        taskstaken = sum(ntasksperrank[:rank])
+        task = {}
+        task['topfilename']  = topfilename
+        task['trjindices']   = range(rank, len(trjfilenames), nranks)
+        task['trjfilenames'] = [trjfilenames[i] for i in task['trjindices']]
+        task['savepath']     = savepath 
+
     print ("rank {}: ".format(myrank), task['trjindices'], task['trjfilenames'])
     sys.stdout.flush()
-#    sys.exit(0)
+    sys.exit(0)
 
     # do the assigned piece of work
     for nf, trjfilename in enumerate(task['trjfilenames']):
