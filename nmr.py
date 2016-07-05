@@ -1213,8 +1213,11 @@ def bondvec_corr_batch_mpi(topfilename, trjfilenames, savepath, subtrjlength=Non
             task['trjfilenames'] = [trjfilenames[i] for i in task['trjindices']]
             task['savepath']     = savepath
 
+            print("Sending task to rank ", rank)
+            print(taks)
             comm.send(task, dest=rank, tag=rank)
 
+    print("Done with sending, receiving")
     task = comm.recv(source=root, tag=myrank)
     print ("rank {}: ".format(myrank), task['trjindices'], task['trjfilenames'])
     sys.stdout.flush()
