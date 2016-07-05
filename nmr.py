@@ -1177,6 +1177,8 @@ def bondvec_corr_batch_mpi(topfilename, trjfilenames, savepath, subtrjlength=Non
         If not specified no fitting is done.
     """
 
+    print("Hi there!")
+
     # set up some timer and counter
     tc = {}
     tc['runtimer']  = time.time()
