@@ -1229,7 +1229,7 @@ def bondvec_corr_batch_mpi(topfilename, trjfilenames, savepath, subtrjlength=Non
 
 #    print ("rank {}: ".format(myrank), task['trjindices'], task['trjfilenames'])
 #    sys.stdout.flush()
-    sys.exit(0)
+#    sys.exit(0)
 
     # do the assigned piece of work
     for nf, trjfilename in enumerate(task['trjfilenames']):
