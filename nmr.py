@@ -1177,8 +1177,6 @@ def bondvec_corr_batch_mpi(topfilename, trjfilenames, savepath, subtrjlength=Non
         If not specified no fitting is done.
     """
 
-    print("Hi there!")
-
     # set up some timer and counter
     tc = {}
     tc['runtimer']  = time.time()
@@ -1213,10 +1211,10 @@ def bondvec_corr_batch_mpi(topfilename, trjfilenames, savepath, subtrjlength=Non
             task['trjfilenames'] = [trjfilenames[i] for i in task['trjindices']]
             task['savepath']     = savepath
 
-            print("Sending task to rank ", rank)
+#            print("Sending task to rank ", rank)
             comm.send(task, dest=rank, tag=rank)
 
-        print("Done with sending, receiving")
+#        print("Done with sending, receiving")
 
     if myrank != root:
         task = comm.recv(source=root, tag=myrank)
@@ -1229,8 +1227,8 @@ def bondvec_corr_batch_mpi(topfilename, trjfilenames, savepath, subtrjlength=Non
         task['trjfilenames'] = [trjfilenames[i] for i in task['trjindices']]
         task['savepath']     = savepath 
 
-    print ("rank {}: ".format(myrank), task['trjindices'], task['trjfilenames'])
-    sys.stdout.flush()
+#    print ("rank {}: ".format(myrank), task['trjindices'], task['trjfilenames'])
+#    sys.stdout.flush()
     sys.exit(0)
 
     # do the assigned piece of work
