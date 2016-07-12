@@ -145,10 +145,17 @@ def dpca(dihedrals, unit='degree', verbose=False):
         print("Projecting data on principal components:", end="")
         starttime = time.time()   
     projectedcoords = np.zeros_like(cartcoords, dtype=cartcoords.dtype)
+    msg = ""
     for eig_idx in range(eigvecs.shape[0]):
+        if verbose:
+            print(len(msg)*"\b", end="")
+            msg = " {:3.0f}%".format(100.0*eig_idx / eigvecs.shape[0])
+            print(msg, end="")
+            sys.stdout.flush()
         product = cartcoords * eigvecs[:,eig_idx].reshape([eigvecs.shape[0],1])
         projectedcoords[eig_idx,:] = product.sum(0)
     if verbose:
+        print(len(msg)*"\b", end="")
         print(" {:.2f} sec.".format(time.time() - starttime))    
 
     return eigvals, projectedcoords
