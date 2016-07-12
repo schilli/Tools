@@ -54,7 +54,7 @@ def pca(data, project=False, verbose=False):
     if verbose:
         print("Constructing covariance matrix:", end="")
         starttime = time.time()
-    covariance = np.cov(data)
+    covariance = np.cov(data).astype(data.dtype)
     if verbose:
         print(" {:.2f} sec.".format(time.time() - starttime))
 
@@ -62,6 +62,8 @@ def pca(data, project=False, verbose=False):
         print("Diagonalising covariance matrix:", end="")
         starttime = time.time() 
     eigvals, eigvecs = np.linalg.eig(covariance)
+    eigvals = eigvals.astype(data.dtype)
+    eigvecs = eigvecs.astype(data.dtype)
     if verbose:
         print(" {:.2f} sec.".format(time.time() - starttime)) 
 
