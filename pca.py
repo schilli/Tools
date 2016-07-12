@@ -85,7 +85,7 @@ def pca(data, project=False, verbose=False):
             print("Projecting data in eigenspace:", end="")
             starttime = time.time()   
         # Project data on principal components
-        projectedData = np.zeros_like(data)
+        projectedData = np.zeros_like(data, dtype=data.dtype)
         for point_idx in range(data.shape[1]):
             for eig_idx in range(eigvecs.shape[0]):
                 projectedData[eig_idx, point_idx] = np.dot(eigvecs[:,eig_idx], data[:,point_idx]) 
@@ -109,7 +109,7 @@ def dpca(dihedrals, unit='degree', verbose=False):
     """
 
     # Create cartesian coordinate space of x = cos(phi), y = sin(phi)
-    cartcoords = np.zeros([2 * dihedrals.shape[0], dihedrals.shape[1]], dtype=np.float)
+    cartcoords = np.zeros([2 * dihedrals.shape[0], dihedrals.shape[1]], dtype=dihedrals.dtype)
     if unit == "degree":
         cosines = np.cos(const.pi / 180.0 * dihedrals)
         sines   = np.sin(const.pi / 180.0 * dihedrals)
@@ -142,7 +142,7 @@ def dpca(dihedrals, unit='degree', verbose=False):
     if verbose:
         print("Projecting data on principal components:", end="")
         starttime = time.time()   
-    projectedcoords = np.zeros_like(cartcoords)
+    projectedcoords = np.zeros_like(cartcoords, dtype=cartcoords.dtype)
     for eig_idx in range(eigvecs.shape[0]):
         product = cartcoords * eigvecs[:,eig_idx].reshape([eigvecs.shape[0],1])
         projectedcoords[eig_idx,:] = product.sum(0)
