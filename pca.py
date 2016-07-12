@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 import pca
 import sys, time
 import numpy as np
@@ -22,7 +24,7 @@ def test(n=100):
 
     w, v = pca(data)
 
-    print v
+    print(v)
 
     plt.plot(data[0,:], data[1,:], '.')
     plt.plot([0, v[0,0]], [0, v[1,0]], 'r')
@@ -34,7 +36,7 @@ def test(n=100):
 
 
 
-def pca(data, project=False):
+def pca(data, project=False, verbose=False):
     """Compute the principal components of the given data based on eigenvalue decomposition
     Input:
         data: First index (rows) are variables,
@@ -49,11 +51,25 @@ def pca(data, project=False):
     """
 
     # diagonalize covariance matrix
+    if verbose:
+        print("Constructing covariance matrix:", end="")
+        starttime = time.time()
     covariance = np.cov(data)
+    if verbose:
+        print(" {:.2f} sec.".format(time.time() - starttime))
+
+    if verbose:
+        print("Diagonalising covariance matrix:", end="")
+        starttime = time.time() 
     eigvals, eigvecs = np.linalg.eig(covariance)
-    sortedeigvecs = np.copy(eigvecs)
+    if verbose:
+        print(" {:.2f} sec.".format(time.time() - starttime)) 
 
     # sort eigenvectors by eigenvalue in decreasing order
+    if verbose:
+        print("Sorting eigenvectors by eigenvalues:", end="")
+        starttime = time.time()  
+    sortedeigvecs = np.copy(eigvecs)
     tmp = [[eigvals[i], eigvecs[:,i]] for i in range(len(eigvals))]
     tmp.sort()
     i = len(eigvals)
@@ -61,13 +77,20 @@ def pca(data, project=False):
         i -= 1
         eigvals      [  i] = eigval
         sortedeigvecs[:,i] = eigvec
+    if verbose:
+        print(" {:.2f} sec.".format(time.time() - starttime))  
 
     if project:
+        if verbose:
+            print("Projecting data in eigenspace:", end="")
+            starttime = time.time()   
         # Project data on principal components
         projectedData = np.zeros_like(data)
         for point_idx in range(data.shape[1]):
             for eig_idx in range(eigvecs.shape[0]):
                 projectedData[eig_idx, point_idx] = np.dot(eigvecs[:,eig_idx], data[:,point_idx]) 
+        if verbose:
+            print(" {:.2f} sec.".format(time.time() - starttime))   
         return eigvals, sortedeigvecs, projectedData
 
     else:
@@ -75,7 +98,7 @@ def pca(data, project=False):
 
 
 
-def dpca(dihedrals, unit='degree'):
+def dpca(dihedrals, unit='degree', verbose=False):
     """Perform a dihedral pca
     Input:
         Dihedral angle data: rows (first index) are the angles and
@@ -94,7 +117,7 @@ def dpca(dihedrals, unit='degree'):
         cosines = np.cos(dihedrals)
         sines   = np.sin(dihedrals) 
     else:
-        print "Angular unit must be degree or radian but not {}".format(unit)
+        print("Angular unit must be degree or radian but not {}".format(unit))
         sys.exit(0)
     cos_idx = np.arange(0,2*dihedrals.shape[0],2)
     sin_idx = np.arange(1,2*dihedrals.shape[0],2)
@@ -102,13 +125,29 @@ def dpca(dihedrals, unit='degree'):
     cartcoords[sin_idx,:] = sines
 
     # Compute pca
-    eigvals, eigvecs = pca(cartcoords)
+    eigvals, eigvecs = pca(cartcoords, verbose=verbose)
 
-    # Project data on principal components
+#    # Project data on principal components
+#    if verbose:
+#        print("Projecting data on principal components:", end="")
+#        starttime = time.time()   
+#    projectedcoords = np.zeros_like(cartcoords)
+#    for point_idx in range(cartcoords.shape[1]):
+#        for eig_idx in range(eigvecs.shape[0]):
+#            projectedcoords[eig_idx, point_idx] = np.dot(eigvecs[:,eig_idx], cartcoords[:,point_idx])
+#    if verbose:
+#        print(" {:.2f} sec.".format(time.time() - starttime))   
+
+    # Project data on principal components more efficiently
+    if verbose:
+        print("Projecting data on principal components:", end="")
+        starttime = time.time()   
     projectedcoords = np.zeros_like(cartcoords)
-    for point_idx in range(cartcoords.shape[1]):
-        for eig_idx in range(eigvecs.shape[0]):
-            projectedcoords[eig_idx, point_idx] = np.dot(eigvecs[:,eig_idx], cartcoords[:,point_idx])
+    for eig_idx in range(eigvecs.shape[0]):
+        product = cartcoords * eigvecs[:,eig_idx].reshape([eigvecs.shape[0],1])
+        projectedcoords[eig_idx,:] = product.sum(0)
+    if verbose:
+        print(" {:.2f} sec.".format(time.time() - starttime))    
 
     return eigvals, projectedcoords
     
@@ -120,7 +159,7 @@ def fes(projectedcoords, dim=2, T=300, nbins=5):
     Ei = k*T * [ln(Nmax) - ln(Ni)]
     """
     if dim > 3 or dim > projectedcoords.shape[0]:
-        print "dim must not be larger than 3 or the dimension of input coordinates"""
+        print("dim must not be larger than 3 or the dimension of input coordinates""")
         sys.exit(1)
 
     coords = projectedcoords[:dim,:]
@@ -141,7 +180,7 @@ def fes(projectedcoords, dim=2, T=300, nbins=5):
     for point_idx in range(coords.shape[1]):
         for dim_idx in range(dim):
             binIndex[dim_idx] = int((coords[dim_idx, point_idx] - (minima[dim_idx] - deltas[dim_idx]/2.0)) / deltas[dim_idx])
-            #print point_idx, dim_idx, binIndex[dim_idx]
+            #print(point_idx, dim_idx, binIndex[dim_idx])
         counts[tuple(binIndex)] += 1
 
     # estimate FES
@@ -272,7 +311,7 @@ def cluster_jarvis_patrick(data, J=5, K=3, cutoff=None, dim="all", verbose=False
     elif dim <= data.shape[1]:
         coord = data[:dim,:]
     else:
-        print "The number of dimensions for clustering must be <= the number of dimensions of the input data"
+        print("The number of dimensions for clustering must be <= the number of dimensions of the input data")
         sys.exit(1)
 
     # construct neighbour lists
@@ -284,18 +323,18 @@ def cluster_jarvis_patrick(data, J=5, K=3, cutoff=None, dim="all", verbose=False
             neighbours.append(J_nearest_neighbours(data, i, J))
             neighbourListSize += len(neighbours[-1])
             if neighbourListSize * sys.getsizeof(int()) > 4*1024**3:
-                print "Neighbour lists are getting too large! Too large cutoff?"
+                print("Neighbour lists are getting too large! Too large cutoff?")
                 sys.exit(1)
     else:
         for i in range(data.shape[1]):
             neighbours.append(nearest_neighbours_cutoff(data, i, cutoff))
             neighbourListSize += len(neighbours[-1])
             if neighbourListSize * sys.getsizeof(int()) > 4*1024**3:
-                print "Neighbour lists are getting too large! Too large cutoff?"
+                print("Neighbour lists are getting too large! Too large cutoff?")
                 sys.exit(1) 
     endtime = time.time()
     if verbose:
-        print "Neighbour list construction took {:.2e} sec.".format(endtime - starttime)
+        print("Neighbour list construction took {:.2e} sec.".format(endtime - starttime))
 
     # cluster
     starttime = time.time()
@@ -310,7 +349,7 @@ def cluster_jarvis_patrick(data, J=5, K=3, cutoff=None, dim="all", verbose=False
         clusters.append(cluster)
     endtime = time.time()
     if verbose:
-        print "Clustering took {:.2e} sec.".format(endtime - starttime) 
+        print("Clustering took {:.2e} sec.".format(endtime - starttime) )
 
 
     # sort clusters
@@ -330,7 +369,7 @@ def cluster_jarvis_patrick(data, J=5, K=3, cutoff=None, dim="all", verbose=False
                 continue
     endtime = time.time()
     if verbose:
-        print "Sorting clusters took {:.2e} sec.".format(endtime - starttime) 
+        print("Sorting clusters took {:.2e} sec.".format(endtime - starttime) )
  
 
     centers = central_structures(clusters, coord)
@@ -351,7 +390,7 @@ def cluster_affinity_propagation(data, memlim=10):
     """ 
     ndim, nsamples = data.shape
     if nsamples**2*8.0/1024**3 > memlim:
-        print "Distance matrix would be larger than {} GB. Aborting.".format(memlim)
+        print("Distance matrix would be larger than {} GB. Aborting.".format(memlim))
         sys.exit(1)
 
     # compute distance matrix
@@ -363,9 +402,9 @@ def cluster_affinity_propagation(data, memlim=10):
     centers, featureTrj = skc.affinity_propagation(dist, copy=False, damping=0.5)
     nclusters = centers.shape[0]
     populations = Counter(featureTrj)
-#    print populations
-#    print centers
-#    print featureTrj
+#    print(populations)
+#    print(centers)
+#    print(featureTrj)
 
     # sort clusters by size
     popsunsrt = np.array([int(i) for i in populations.values()]) / (1.0 * nsamples)
