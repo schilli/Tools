@@ -158,7 +158,7 @@ def dpca(dihedrals, unit='degree', verbose=False):
         print(len(msg)*"\b", end="")
         print(" {:.2f} sec.".format(time.time() - starttime))    
 
-    return eigvals, projectedcoords
+    return eigvals, eigvecs, projectedcoords
     
 
 
