@@ -983,7 +983,7 @@ def save_corr(savefilename, corr, corrstd, corrstdmean, bondvecinfo, topfilename
     npzfilename       = "corr.npz"
     infofilename      = "info.dat"
 
-    if not os.path.isdir(savefilepath):
+    if not os.path.isdir(savefilepath) and not savefilepath == '':
         os.mkdir(savefilepath)
 
     info = {}
