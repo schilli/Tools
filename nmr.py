@@ -404,7 +404,7 @@ class OrderParameter(object):
 
 # ==================================== #
 
-    def estimate_generalLS_modelSelection(self, fast=True, internal=False, weighted=False, maxdecays=float('inf'), **kwargs):
+    def estimate_generalLS_modelSelection(self, fast=True, internal=False, weighted=False, maxdecays=int(1e3), **kwargs):
 
         dt      = self.avgcorr.dt
         ncorr   = self.avgcorr.corr.shape[0]
