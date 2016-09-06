@@ -111,7 +111,7 @@ class OrderParameter(object):
 
 # ==================================== #
 
-    def __init__(self, corrfilenames=None, converged=True, verbose=True, **kwargs):
+    def __init__(self, corrfilenames=None, converged=True, verbose=True, sort=True, **kwargs):
         self.corrfilenames = corrfilenames
         self.converged     = converged
         self.verbose       = verbose
@@ -135,11 +135,11 @@ class OrderParameter(object):
 
         # load data
         if self.corrfilenames is not None:
-            self.load()
+            self.load(sort=sort)
  
 # ==================================== #
 
-    def load(self, corrfilenames=None):
+    def load(self, corrfilenames=None, sort=True):
         """
         Load sets of correlation functions.
 
@@ -147,11 +147,19 @@ class OrderParameter(object):
         ----------
         corrfilenames : list
             List with *.zip filenames containing correlation functions.
+        sort: boolean
+            if True, sort corrfilenames before loading
  
         """
 
         if corrfilenames is not None:
             self.corrfilenames = corrfilenames
+
+        # The order in which correlationfunctions are loaded can affect the computation
+        # of the mean and standard deviations later on.
+        # To ensure reproducability, sort them here!
+        if sort:
+            self.corrfilenames.sort()
 
         starttime = time.time()
 
@@ -174,16 +182,23 @@ class OrderParameter(object):
 
 # ==================================== #
 
-    def average_corr(self):
+    def average_corr(self, offset=0):
         """
         Compute the average correlation function and its standard deviation
+
+        Parameters:
+        -----------
+        offset: int
+            determines the order in which the correlation functions are averaged
         """
         nvec, nframes = self.corrlist[0].corr.shape
         ncorr         = len(self.corrlist)
         allcorr = np.zeros([ncorr, nvec, nframes], dtype=self.corrlist[0].corr.dtype)
 
-        for c, corr in enumerate(self.corrlist):
-            allcorr[c,:,:] = corr.corr
+        for i, c in enumerate(range(offset, ncorr+offset)):
+            allcorr[i,:,:] = self.corrlist[c % ncorr].corr
+        #for c, corr in enumerate(self.corrlist):
+        #    allcorr[c,:,:] = corr.corr
 
         self.avgcorr = corrFunction(corr=allcorr.mean(0), std=allcorr.std(0), error=allcorr.std(0)/allcorr.shape[0]**0.5)
         self.avgcorr.resid       = copy.copy(self.corrlist[0].resid      )
@@ -202,6 +217,8 @@ class OrderParameter(object):
         self.avgcorr.npzfilename = None
         self.avgcorr.trjfilename = None
         self.avgcorr.frames      = None
+
+        return allcorr
 
 # ==================================== #
 
