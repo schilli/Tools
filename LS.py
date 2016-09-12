@@ -29,14 +29,16 @@ class LS(object):
         self.t = t 
         self.C = C
         if sigma is not None:
-            self.sigma = sigma
+            self.sigma  = sigma
+            self.sigma2 = sigma**2
         else:
-            self.sigma = np.ones_like(C)
+            self.sigma  = np.ones_like(C)
+            self.sigma2 = self.sigma
         self.internal = False
 
     # ================================ #
 
-    def fit(self, n, fast=True, internal=False, taum=None, taumax=None, p0=None, ftol=1e-12, eps=1e-7, maxiter=1000, verbose=False):
+    def fit(self, n, fast=True, internal=False, taum=None, taumax=None, p0=None, ftol=1e-15, eps=1.4901161193847656e-08, maxiter=1000, verbose=False):
         """
         Fit the data and return optimal parameters
 
@@ -89,11 +91,14 @@ class LS(object):
 
         # extract optimal parameters
         result = {}
-        result["p"]       = res.x # all parameters for function input
-        result["S"]       = res.x[:nS]
-        result["tau"]     = res.x[nS:]
-        result["lsq"]     = res.fun
-        result["success"] = res.success
+        result["p"]          = res.x # all parameters for function input
+        result["S"]          = res.x[:nS]
+        result["tau"]        = res.x[nS:]
+        result["lsq"]        = res.fun
+        result["success"]    = res.success
+        result["iterations"] = res.nit
+        result["status"]     = res.status
+        result["message"]    = res.message
         if self.internal:
             result["tau"] = np.array(list(result["tau"]) + [float('inf')])
 
@@ -199,7 +204,7 @@ class LS(object):
             C           = self.generalLS(para)
             diff        = C - self.C[ic,:]
             squared     = diff**2
-            weighted    = squared / self.sigma[ic,:]**2
+            weighted    = squared / self.sigma2[ic,:]
             sumsquares += weighted.sum()
 
         print(sumsquares, p[-1])
