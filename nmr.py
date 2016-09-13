@@ -419,6 +419,7 @@ class OrderParameter(object):
 
         return overfitted
 
+
 # ==================================== #
 
     def estimate_generalLS_modelSelection(self, fast=True, internal=False, weighted=False, maxdecays=int(1e3), **kwargs):
@@ -440,16 +441,31 @@ class OrderParameter(object):
             else:
                 self.ls = LS.LS(t[firstf:], self.avgcorr.corr[nc,firstf:]) 
 
+#            # Original model selection, discarded
+#            parameters = []
+#            for ndecays in range(1,maxdecays+1):
+#                p = self.ls.fit(ndecays, fast=fast, internal=internal, **kwargs)
+#                overfitted = self.check_overfitting(p)
+#                if not overfitted:
+#                    p["ndecays"] = ndecays
+#                    parameters.append(p)
+
+            # Model selection based on Akaike information criterion
             parameters = []
+            minAIC     = -1*float('inf')
+            minAIC_idx = -1
             for ndecays in range(1,maxdecays+1):
                 p = self.ls.fit(ndecays, fast=fast, internal=internal, **kwargs)
-                overfitted = self.check_overfitting(p)
-                if not overfitted:
-                    p["ndecays"] = ndecays
-                    parameters.append(p)
+                p["ndecays"] = ndecays
+                parameters.append[p]
+                if p['AIC'] < minAIC:
+                    minAIC = p['AIC']
+                    minAIC_idx = ndecays-1
 
             try:
-                p = parameters[-1]
+#               # Original model selection, discarded
+#                p = parameters[-1]
+                p = parameters[minAIC_idx]
             except IndexError:
                 print("Failed to fit correlation function {} ({} {})".format(nc, self.avgcorr.resname[0][nc], self.avgcorr.resid[0][nc]))
                 p = self.ls.fit(1, fast=fast, internal=internal, **kwargs)

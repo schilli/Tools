@@ -99,6 +99,7 @@ class LS(object):
         result["iterations"] = res.nit
         result["status"]     = res.status
         result["message"]    = res.message
+        result["AIC"]        = AIC(RSS=result['lsq'], n=self.C.shape[0], k=result["p"].shape[0])
         if self.internal:
             result["tau"] = np.array(list(result["tau"]) + [float('inf')])
 
@@ -185,11 +186,11 @@ class LS(object):
 
     def generalLS_obj(self, p):
 
-        C          = self.generalLS(p)
-        diff       = C - self.C
-        squared    = diff**2
-        weighted   = squared / self.sigma
-        sumsquares = weighted.sum()
+        C             = self.generalLS(p)
+        diff          = C - self.C
+        self.squares  = diff**2
+        self.weighted = self.squares / self.sigma
+        sumsquares    = self.weighted.sum()
         return sumsquares
 
     # ================================ #
@@ -213,3 +214,25 @@ class LS(object):
  
     # ================================ #
 
+
+
+# ==================================== #
+
+def AIC(RSS, n, k):
+    """
+    Akaike information criterion according to:
+    https://en.wikipedia.org/wiki/Akaike_information_criterion#Comparison_with_least_squares
+
+    Parameters
+    ----------
+    RSS, double
+        Residual sum of squares: sum^{n}_{i=1} (y_i - f(x_i))**2
+        with n the number of datapoints and f() the model
+    n, integer
+        number of datapoints
+    k, integer
+        number of parameters of the model f()
+    """
+
+    return 2*k + n*np.log(RSS)
+ 
