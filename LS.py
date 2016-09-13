@@ -38,7 +38,7 @@ class LS(object):
 
     # ================================ #
 
-    def fit(self, n, fast=True, internal=False, taum=None, taumax=None, p0=None, ftol=1e-15, eps=1.4901161193847656e-08, maxiter=1000, verbose=False):
+    def fit(self, n, fast=True, internal=False, taum=None, taumax=None, p0=None, ftol=1e-12, eps=1.4901161193847656e-08, maxiter=1000, verbose=False):
         """
         Fit the data and return optimal parameters
 

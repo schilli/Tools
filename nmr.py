@@ -393,7 +393,7 @@ class OrderParameter(object):
 
 # ==================================== #
 
-    def check_overfitting(self, parameters, mintauratio=2.0, minS2diff=0.01):
+    def check_overfitting(self, parameters, mintauratio=1.5, minS2diff=0.005):
         """
         Check generalLS parameters for overfitting
         """
