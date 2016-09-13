@@ -457,7 +457,7 @@ class OrderParameter(object):
             for ndecays in range(1,maxdecays+1):
                 p = self.ls.fit(ndecays, fast=fast, internal=internal, **kwargs)
                 p["ndecays"] = ndecays
-                parameters.append[p]
+                parameters.append(p)
                 if p['AIC'] < minAIC:
                     minAIC = p['AIC']
                     minAIC_idx = ndecays-1
