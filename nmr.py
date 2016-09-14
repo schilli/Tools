@@ -422,7 +422,13 @@ class OrderParameter(object):
 
 # ==================================== #
 
-    def estimate_generalLS_modelSelection(self, fast=True, internal=False, weighted=False, maxdecays=int(1e3), **kwargs):
+    def estimate_generalLS_modelSelection(self, fast=True, internal=False, weighted=False, maxdecays=int(1e3), nfits=1, **kwargs):
+        """
+        nfits
+        The number of fits to perform per amino acid.
+        The order of the correlation function for the mean correlation function is randomized for each fit.
+        As fitting is an ill-posed problem, we get better estimates in this way
+        """
 
         dt      = self.avgcorr.dt
         ncorr   = self.avgcorr.corr.shape[0]
@@ -432,71 +438,73 @@ class OrderParameter(object):
         if fast:
             firstf = 1
 
+        AIC        = np.zeros([ncorr, nfits, maxdecays])
+        para       = np.zeros([ncorr, nfits, maxdecays, 2*maxdecays])
+        S2         = np.zeros([ncorr, nfits, maxdecays,   maxdecays])
+        tau        = np.zeros([ncorr, nfits, maxdecays,   maxdecays])
+        success    = np.zeros([ncorr, nfits, maxdecays], dtype=np.bool)
+
         self.para = []
         totaldecays = 1 # maximum number of decays with successful fit
 
         for nc in range(ncorr):
-            if weighted:
-                self.ls = LS.LS(t[firstf:], self.avgcorr.corr[nc,firstf:], sigma=self.avgcorr.std[nc,firstf:])
-            else:
-                self.ls = LS.LS(t[firstf:], self.avgcorr.corr[nc,firstf:]) 
+            for nfit in range(nfits):
 
-#            # Original model selection, discarded
-#            parameters = []
-#            for ndecays in range(1,maxdecays+1):
-#                p = self.ls.fit(ndecays, fast=fast, internal=internal, **kwargs)
-#                overfitted = self.check_overfitting(p)
-#                if not overfitted:
+                # compute new average correlation function
+                np.random.shuffle(opnofit.corrlist)
+                self.average_corr()
+
+                # set up Lipari Szabo fitter
+                if weighted:
+                    self.ls = LS.LS(t[firstf:], self.avgcorr.corr[nc,firstf:], sigma=self.avgcorr.std[nc,firstf:])
+                else:
+                    self.ls = LS.LS(t[firstf:], self.avgcorr.corr[nc,firstf:]) 
+
+                # fit for all correlation functions, correlation function shuffles and number of decays
+                for ndecays in range(1,maxdecays+1):
+                    p = self.ls.fit(ndecays, fast=fast, internal=internal, **kwargs)
+                    AIC    [nc, nfit, ndecays]             = p['AIC']
+                    para   [nc, nfit, ndecays, :2*ndecays] = p['p']
+                    S2     [nc, nfit, ndecays,   :ndecays] = p['S']
+                    tau    [nc, nfit, ndecays,   :ndecays] = p['tau']
+                    success[nc, nfit, ndecays]             = p['success']
+
+
+        # select best model based on AIC
+        return AIC
+
+
+
+#                # Model selection based on Akaike information criterion
+#                parameters = []
+#                minAIC     = float('inf')
+#                minAIC_idx = -1
+#                for ndecays in range(1,maxdecays+1):
+#                    p = self.ls.fit(ndecays, fast=fast, internal=internal, **kwargs)
 #                    p["ndecays"] = ndecays
 #                    parameters.append(p)
-
-            # Model selection based on Akaike information criterion
-            parameters = []
-            minAIC     = float('inf')
-            minAIC_idx = -1
-            for ndecays in range(1,maxdecays+1):
-                p = self.ls.fit(ndecays, fast=fast, internal=internal, **kwargs)
-                p["ndecays"] = ndecays
-                parameters.append(p)
-                if p['AIC'] < minAIC:
-                    minAIC = p['AIC']
-                    minAIC_idx = ndecays-1
-
-            try:
-#               # Original model selection, discarded
-#                p = parameters[-1]
-                p = parameters[minAIC_idx]
-                p['AICs'] = np.array([para['AIC'] for para in parameters])
-            except IndexError:
-                print("Failed to fit correlation function {} ({} {})".format(nc, self.avgcorr.resname[0][nc], self.avgcorr.resid[0][nc]))
-                p = self.ls.fit(1, fast=fast, internal=internal, **kwargs)
-                p["ndecays"] = 1
-            self.para.append(p)
-            totaldecays = max(totaldecays, p["ndecays"])
-            
-
-
-#            ndecays    = 0
-#            overfitted = False
-#            while (not overfitted) and (ndecays < maxdecays):
-#                ndecays += 1
-#                p = self.ls.fit(ndecays, fast=fast, internal=internal, **kwargs)
-#                overfitted = self.check_overfitting(p)
+#                    if p['AIC'] < minAIC:
+#                        minAIC = p['AIC']
+#                        minAIC_idx = ndecays-1
 #
-#            if overfitted:
-#                ndecays -= 1
-#                p = self.ls.fit(ndecays, fast=fast, internal=internal, **kwargs)
-#            totaldecays = max(totaldecays, ndecays)
-#            print("{:3d}".format(ndecays), ndecays * "=")
-#            self.para.append(p)
-
-        self.S2   = np.zeros([ncorr, totaldecays])
-        self.tau  = np.zeros([ncorr, totaldecays]) 
-        for nc in range(ncorr):
-            p = self.para[nc]
-            ndecays = len(p["S"])
-            self.S2[nc,:ndecays]  = p["S"]
-            self.tau[nc,:ndecays] = p["tau"]
+#                try:
+#                    p = parameters[minAIC_idx]
+#                    p['AICs'] = np.array([para['AIC'] for para in parameters])
+#                except IndexError:
+#                    print("Failed to fit correlation function {} ({} {})".format(nc, self.avgcorr.resname[0][nc], self.avgcorr.resid[0][nc]))
+#                    p = self.ls.fit(1, fast=fast, internal=internal, **kwargs)
+#                    p["ndecays"] = 1
+#                self.para.append(p)
+#                totaldecays = max(totaldecays, p["ndecays"])
+#            
+#
+#        self.S2   = np.zeros([ncorr, totaldecays])
+#        self.tau  = np.zeros([ncorr, totaldecays]) 
+#        for nc in range(ncorr):
+#            p = self.para[nc]
+#            ndecays = len(p["S"])
+#            self.S2[nc,:ndecays]  = p["S"]
+#            self.tau[nc,:ndecays] = p["tau"]
  
 
 # ==================================== #
