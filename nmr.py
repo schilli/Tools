@@ -435,6 +435,7 @@ class OrderParameter(object):
 
         dt      = self.avgcorr.dt
         ncorr   = self.avgcorr.corr.shape[0]
+        ncorr   = 2
         nframes = self.avgcorr.corr.shape[1]
         t       = np.linspace(0, dt*nframes, nframes)
         firstf  = 0
@@ -451,10 +452,11 @@ class OrderParameter(object):
         totaldecays = 1 # maximum number of decays with successful fit
 
         for nc in range(ncorr):
-            print("nc: {:4d}/{:4d}".format(nc,ncorr), end="")
+            print("nc: {:4d}/{:4d}".format(nc,ncorr), end=""); sys.stdout.flush()
 
             for nfit in range(nfits):
-                print(nfit, end="")
+                print(", ", nfit, end=""); sys.stdout.flush()
+                
 
                 # compute new average correlation function
                 np.random.shuffle(self.corrlist)
