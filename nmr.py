@@ -430,6 +430,7 @@ class OrderParameter(object):
         As fitting is an ill-posed problem, we get better estimates in this way
         """
 
+        randomstate = np.random.get_state()
         np.random.seed(23)
 
         dt      = self.avgcorr.dt
@@ -464,13 +465,17 @@ class OrderParameter(object):
 
                 # fit for all correlation functions, correlation function shuffles and number of decays
                 for ndecays in range(1,maxdecays+1):
+                    decay_ndx = ndecays - 1
                     p = self.ls.fit(ndecays, fast=fast, internal=internal, **kwargs)
-                    AIC    [nc, nfit, ndecays]             = p['AIC']
-                    para   [nc, nfit, ndecays, :2*ndecays] = p['p']
-                    S2     [nc, nfit, ndecays,   :ndecays] = p['S']
-                    tau    [nc, nfit, ndecays,   :ndecays] = p['tau']
-                    success[nc, nfit, ndecays]             = p['success']
+                    AIC    [nc, nfit, decays_ndx]                = p['AIC']
+                    para   [nc, nfit, decays_ndx, :2*decays_ndx] = p['p']
+                    S2     [nc, nfit, decays_ndx,   :decays_ndx] = p['S']
+                    tau    [nc, nfit, decays_ndx,   :decays_ndx] = p['tau']
+                    success[nc, nfit, decays_ndx]                = p['success']
 
+
+        # reset random number generator state
+        np.random.set_state(randomstate)
 
         # select best model based on AIC
         return AIC
