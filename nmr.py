@@ -451,7 +451,10 @@ class OrderParameter(object):
         totaldecays = 1 # maximum number of decays with successful fit
 
         for nc in range(ncorr):
+            print("nc: {:4d}/{:4d}".format(nc,ncorr), end="")
+
             for nfit in range(nfits):
+                print(nfit, end"")
 
                 # compute new average correlation function
                 np.random.shuffle(self.corrlist)
@@ -473,6 +476,7 @@ class OrderParameter(object):
                     tau    [nc, nfit, decay_ndx,   :ndecays] = p['tau']
                     success[nc, nfit, decay_ndx]             = p['success']
 
+            print("")
 
         # reset random number generator state
         np.random.set_state(randomstate)
