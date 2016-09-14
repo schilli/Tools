@@ -452,7 +452,7 @@ class OrderParameter(object):
 
             # Model selection based on Akaike information criterion
             parameters = []
-            minAIC     = -1*float('inf')
+            minAIC     = float('inf')
             minAIC_idx = -1
             for ndecays in range(1,maxdecays+1):
                 p = self.ls.fit(ndecays, fast=fast, internal=internal, **kwargs)
@@ -466,6 +466,7 @@ class OrderParameter(object):
 #               # Original model selection, discarded
 #                p = parameters[-1]
                 p = parameters[minAIC_idx]
+                p['AICs'] = np.array([para['AIC'] for para in parameters])
             except IndexError:
                 print("Failed to fit correlation function {} ({} {})".format(nc, self.avgcorr.resname[0][nc], self.avgcorr.resid[0][nc]))
                 p = self.ls.fit(1, fast=fast, internal=internal, **kwargs)
