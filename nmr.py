@@ -467,11 +467,11 @@ class OrderParameter(object):
                 for ndecays in range(1,maxdecays+1):
                     decay_ndx = ndecays - 1
                     p = self.ls.fit(ndecays, fast=fast, internal=internal, **kwargs)
-                    AIC    [nc, nfit, decay_ndx]               = p['AIC']
-                    para   [nc, nfit, decay_ndx, :2*decay_ndx] = p['p']
-                    S2     [nc, nfit, decay_ndx,   :decay_ndx] = p['S']
-                    tau    [nc, nfit, decay_ndx,   :decay_ndx] = p['tau']
-                    success[nc, nfit, decay_ndx]               = p['success']
+                    AIC    [nc, nfit, decay_ndx]             = p['AIC']
+                    para   [nc, nfit, decay_ndx, :2*ndecays] = p['p']
+                    S2     [nc, nfit, decay_ndx,   :ndecays] = p['S']
+                    tau    [nc, nfit, decay_ndx,   :ndecays] = p['tau']
+                    success[nc, nfit, decay_ndx]             = p['success']
 
 
         # reset random number generator state
