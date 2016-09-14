@@ -447,15 +447,16 @@ class OrderParameter(object):
         S2         = np.zeros([ncorr, nfits, maxdecays,   maxdecays])
         tau        = np.zeros([ncorr, nfits, maxdecays,   maxdecays])
         success    = np.zeros([ncorr, nfits, maxdecays], dtype=np.bool)
+        paralist   = [[[] for nfit in range(nfits)] for nc in range(ncorr)]
 
         self.para = []
         totaldecays = 1 # maximum number of decays with successful fit
 
         for nc in range(ncorr):
-            print("nc: {:4d}/{:4d}".format(nc,ncorr), end=""); sys.stdout.flush()
+            print("nc: {:4d}/{:4d}:".format(nc,ncorr), end=""); sys.stdout.flush()
 
             for nfit in range(nfits):
-                print(", ", nfit, end=""); sys.stdout.flush()
+                print("", nfit, end=""); sys.stdout.flush()
                 
 
                 # compute new average correlation function
@@ -472,6 +473,7 @@ class OrderParameter(object):
                 for ndecays in range(1,maxdecays+1):
                     decay_ndx = ndecays - 1
                     p = self.ls.fit(ndecays, fast=fast, internal=internal, **kwargs)
+                    paralist[nc][nfit].append(p)
                     AIC    [nc, nfit, decay_ndx]             = p['AIC']
                     para   [nc, nfit, decay_ndx, :2*ndecays] = p['p']
                     S2     [nc, nfit, decay_ndx,   :ndecays] = p['S']
@@ -483,9 +485,45 @@ class OrderParameter(object):
         # reset random number generator state
         np.random.set_state(randomstate)
 
-        # select best model based on AIC
-        return AIC
+        # compute probabilities for each model to be the best
+        probability = np.exp((AIC.min(2, keepdims=True) - AIC)/2)
+        probability /= probability.sum(2, keepdims=True)
+        meanprob    = probability.mean(1)
 
+        # select best model based on AIC
+        bestmodel = meanprob.argmax(1)
+        bestprob  = meanprob.max(1)
+        goodfits  = probability.argmax(2) - bestmodel.reshape([bestmodel.shape[0],1]) == 0
+
+        # store S2 and tau of the best model for each residue
+        self.S2      = np.array([S2 [nc,goodfits[nc,:],bestmodel].mean() for nc in range(ncorr)])
+        self.S2std   = np.array([S2 [nc,goodfits[nc,:],bestmodel].std()  for nc in range(ncorr)])
+        self.tau     = np.array([tau[nc,goodfits[nc,:],bestmodel].mean() for nc in range(ncorr)])
+        self.taustd  = np.array([tau[nc,goodfits[nc,:],bestmodel].std()  for nc in range(ncorr)]) 
+#        self.S2      = S2 [:,:,bestmodel].mean(1)
+#        self.S2std   = S2 [:,:,bestmodel].std(1)
+#        self.tau     = tau[:,:,bestmodel].mean(1)
+#        self.taustd  = tau[:,:,bestmodel].std(1)
+        self.ndecays = bestmodel
+        self.prob    = bestprob
+
+        # store list of one original fitting result for each residue
+        self.para = []
+        for nc in range(ncorr):
+            clearestfit = probability[nc,:,bestmodel[nc]].argmax()
+            self.para.append(paralist[nc][clearestfit][bestmodel[nc]])
+
+
+
+
+#        self.S2   = np.zeros([ncorr, totaldecays])
+#        self.tau  = np.zeros([ncorr, totaldecays]) 
+#        for nc in range(ncorr):
+#            p = self.para[nc]
+#            ndecays = len(p["S"])
+#            self.S2[nc,:ndecays]  = p["S"]
+#            self.tau[nc,:ndecays] = p["tau"]
+ 
 
 
 #                # Model selection based on Akaike information criterion
