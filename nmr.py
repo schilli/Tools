@@ -430,6 +430,8 @@ class OrderParameter(object):
         As fitting is an ill-posed problem, we get better estimates in this way
         """
 
+        np.random.seed(23)
+
         dt      = self.avgcorr.dt
         ncorr   = self.avgcorr.corr.shape[0]
         nframes = self.avgcorr.corr.shape[1]
@@ -451,7 +453,7 @@ class OrderParameter(object):
             for nfit in range(nfits):
 
                 # compute new average correlation function
-                np.random.shuffle(opnofit.corrlist)
+                np.random.shuffle(self.corrlist)
                 self.average_corr()
 
                 # set up Lipari Szabo fitter
