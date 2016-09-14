@@ -454,7 +454,7 @@ class OrderParameter(object):
             print("nc: {:4d}/{:4d}".format(nc,ncorr), end="")
 
             for nfit in range(nfits):
-                print(nfit, end"")
+                print(nfit, end="")
 
                 # compute new average correlation function
                 np.random.shuffle(self.corrlist)
