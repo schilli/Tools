@@ -496,6 +496,7 @@ class OrderParameter(object):
         goodfits  = probability.argmax(2) - bestmodel.reshape([bestmodel.shape[0],1]) == 0
 
         # store S2 and tau of the best model for each residue
+        return S2, goodfits, bestmodel, ncorr
         self.S2      = np.array([S2 [nc,goodfits[nc,:],bestmodel].mean() for nc in range(ncorr)])
         self.S2std   = np.array([S2 [nc,goodfits[nc,:],bestmodel].std()  for nc in range(ncorr)])
         self.tau     = np.array([tau[nc,goodfits[nc,:],bestmodel].mean() for nc in range(ncorr)])
