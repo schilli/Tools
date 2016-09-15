@@ -442,12 +442,12 @@ class OrderParameter(object):
         if fast:
             firstf = 1
 
-        AIC        = np.zeros([ncorr, nfits, maxdecays])
-        para       = np.zeros([ncorr, nfits, maxdecays, 2*maxdecays])
-        S2         = np.zeros([ncorr, nfits, maxdecays,   maxdecays])
-        tau        = np.zeros([ncorr, nfits, maxdecays,   maxdecays])
-        success    = np.zeros([ncorr, nfits, maxdecays], dtype=np.bool)
-        paralist   = [[[] for nfit in range(nfits)] for nc in range(ncorr)]
+        self._AIC      = np.zeros([ncorr, nfits, maxdecays])
+        self._para     = np.zeros([ncorr, nfits, maxdecays, 2*maxdecays])
+        self._S2       = np.zeros([ncorr, nfits, maxdecays,   maxdecays])
+        self._tau      = np.zeros([ncorr, nfits, maxdecays,   maxdecays])
+        self._success  = np.zeros([ncorr, nfits, maxdecays], dtype=np.bool)
+        self._paralist = [[[] for nfit in range(nfits)] for nc in range(ncorr)]
 
         self.para = []
 #        totaldecays = 1 # maximum number of decays with successful fit
@@ -497,86 +497,44 @@ class OrderParameter(object):
                 for ndecays in range(1,maxdecays+1):
                     decay_ndx = ndecays - 1
                     p = self.ls.fit(ndecays, fast=fast, internal=internal, **kwargs)
-                    paralist[nc][nfit].append(p)
-                    AIC    [nc, nfit, decay_ndx]             = p['AIC']
-                    para   [nc, nfit, decay_ndx, :2*ndecays] = p['p']
-                    S2     [nc, nfit, decay_ndx,   :ndecays] = p['S']
-                    tau    [nc, nfit, decay_ndx,   :ndecays] = p['tau']
-                    success[nc, nfit, decay_ndx]             = p['success']
+                    self._paralist[nc][nfit].append(p)
+                    self._AIC    [nc, nfit, decay_ndx]             = p['AIC']
+                    self._para   [nc, nfit, decay_ndx, :2*ndecays] = p['p']
+                    self._S2     [nc, nfit, decay_ndx,   :ndecays] = p['S']
+                    self._tau    [nc, nfit, decay_ndx,   :ndecays] = p['tau']
+                    self._success[nc, nfit, decay_ndx]             = p['success']
 
 
         # reset random number generator state
         np.random.set_state(randomstate)
 
         # compute probabilities for each model to be the best
-        probability = np.exp((AIC.min(2, keepdims=True) - AIC)/2)
-        probability /= probability.sum(2, keepdims=True)
-        meanprob    = probability.mean(1)
+        self._probability  = np.exp((self._AIC.min(2, keepdims=True) - self._AIC)/2)
+        self._probability /= self._probability.sum(2, keepdims=True)
+        self._meanprob     = self._probability.mean(1)
 
         # select best model based on AIC
-        bestmodel = meanprob.argmax(1)
-        bestprob  = meanprob.max(1)
-        goodfits  = probability.argmax(2) - bestmodel.reshape([bestmodel.shape[0],1]) == 0
+        self._bestmodel = self._meanprob.argmax(1)
+        self._bestprob  = self._meanprob.max(1)
+        self._goodfits  = self._probability.argmax(2) - self._bestmodel.reshape([self._bestmodel.shape[0],1]) == 0
 
         # store S2 and tau of the best model for each residue
-        self.S2      = np.array([S2 [nc,goodfits[nc,:],bestmodel[nc],:].mean(0) for nc in range(ncorr)])
-        self.S2std   = np.array([S2 [nc,goodfits[nc,:],bestmodel[nc],:].std (0) for nc in range(ncorr)])
-        self.tau     = np.array([tau[nc,goodfits[nc,:],bestmodel[nc],:].mean(0) for nc in range(ncorr)])
-        self.taustd  = np.array([tau[nc,goodfits[nc,:],bestmodel[nc],:].std (0) for nc in range(ncorr)]) 
-        self.ndecays = bestmodel + 1
-        self.prob    = bestprob
+        self.S2      = np.array([self._S2 [nc,self._goodfits[nc,:],self._bestmodel[nc],:].mean(0) for nc in range(ncorr)])
+        self.S2std   = np.array([self._S2 [nc,self._goodfits[nc,:],self._bestmodel[nc],:].std (0) for nc in range(ncorr)])
+        self.tau     = np.array([self._tau[nc,self._goodfits[nc,:],self._bestmodel[nc],:].mean(0) for nc in range(ncorr)])
+        self.taustd  = np.array([self._tau[nc,self._goodfits[nc,:],self._bestmodel[nc],:].std (0) for nc in range(ncorr)]) 
+        self.ndecays = self._bestmodel + 1
+        self.prob    = self._bestprob
 
         # store list of one original fitting result for each residue
         self.para = []
         for nc in range(ncorr):
-            clearestfit = probability[nc,:,bestmodel[nc]].argmax()
-            self.para.append(paralist[nc][clearestfit][bestmodel[nc]])
+            clearestfit = self._probability[nc,:,self._bestmodel[nc]].argmax()
+            self.para.append(self._paralist[nc][clearestfit][self._bestmodel[nc]])
             self.para[-1]['S'  ] = self.S2 [nc,:self.ndecays[nc]-1]
             self.para[-1]['tau'] = self.tau[nc,:self.ndecays[nc]-1]
             self.para[-1]['p'  ] = np.concatenate((self.para[-1]['S'], self.para[-1]['tau']))
 
-
-#        self.S2   = np.zeros([ncorr, totaldecays])
-#        self.tau  = np.zeros([ncorr, totaldecays]) 
-#        for nc in range(ncorr):
-#            p = self.para[nc]
-#            ndecays = len(p["S"])
-#            self.S2[nc,:ndecays]  = p["S"]
-#            self.tau[nc,:ndecays] = p["tau"]
- 
-
-
-#                # Model selection based on Akaike information criterion
-#                parameters = []
-#                minAIC     = float('inf')
-#                minAIC_idx = -1
-#                for ndecays in range(1,maxdecays+1):
-#                    p = self.ls.fit(ndecays, fast=fast, internal=internal, **kwargs)
-#                    p["ndecays"] = ndecays
-#                    parameters.append(p)
-#                    if p['AIC'] < minAIC:
-#                        minAIC = p['AIC']
-#                        minAIC_idx = ndecays-1
-#
-#                try:
-#                    p = parameters[minAIC_idx]
-#                    p['AICs'] = np.array([para['AIC'] for para in parameters])
-#                except IndexError:
-#                    print("Failed to fit correlation function {} ({} {})".format(nc, self.avgcorr.resname[0][nc], self.avgcorr.resid[0][nc]))
-#                    p = self.ls.fit(1, fast=fast, internal=internal, **kwargs)
-#                    p["ndecays"] = 1
-#                self.para.append(p)
-#                totaldecays = max(totaldecays, p["ndecays"])
-#            
-#
-#        self.S2   = np.zeros([ncorr, totaldecays])
-#        self.tau  = np.zeros([ncorr, totaldecays]) 
-#        for nc in range(ncorr):
-#            p = self.para[nc]
-#            ndecays = len(p["S"])
-#            self.S2[nc,:ndecays]  = p["S"]
-#            self.tau[nc,:ndecays] = p["tau"]
- 
 
 # ==================================== #
 
