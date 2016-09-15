@@ -496,11 +496,11 @@ class OrderParameter(object):
         goodfits  = probability.argmax(2) - bestmodel.reshape([bestmodel.shape[0],1]) == 0
 
         # store S2 and tau of the best model for each residue
-        return S2, goodfits, bestmodel, ncorr
-        self.S2      = np.array([S2 [nc,goodfits[nc,:],bestmodel].mean() for nc in range(ncorr)])
-        self.S2std   = np.array([S2 [nc,goodfits[nc,:],bestmodel].std()  for nc in range(ncorr)])
-        self.tau     = np.array([tau[nc,goodfits[nc,:],bestmodel].mean() for nc in range(ncorr)])
-        self.taustd  = np.array([tau[nc,goodfits[nc,:],bestmodel].std()  for nc in range(ncorr)]) 
+        #return S2, goodfits, bestmodel, ncorr
+        self.S2      = np.array([S2 [nc,goodfits[nc,:],bestmodel[nc],:].mean(0) for nc in range(ncorr)])
+        self.S2std   = np.array([S2 [nc,goodfits[nc,:],bestmodel[nc],:].std (0) for nc in range(ncorr)])
+        self.tau     = np.array([tau[nc,goodfits[nc,:],bestmodel[nc],:].mean(0) for nc in range(ncorr)])
+        self.taustd  = np.array([tau[nc,goodfits[nc,:],bestmodel[nc],:].std (0) for nc in range(ncorr)]) 
 #        self.S2      = S2 [:,:,bestmodel].mean(1)
 #        self.S2std   = S2 [:,:,bestmodel].std(1)
 #        self.tau     = tau[:,:,bestmodel].mean(1)
