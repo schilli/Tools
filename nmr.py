@@ -533,8 +533,8 @@ class OrderParameter(object):
         for nc in range(ncorr):
             clearestfit = self._probability[nc,:,self._bestmodel[nc]].argmax()
             self.para.append(self._paralist[nc][clearestfit][self._bestmodel[nc]])
-            self.para[-1]['S'  ] = self.S2 [nc,:self.ndecays[nc]-1]
-            self.para[-1]['tau'] = self.tau[nc,:self.ndecays[nc]-1]
+            self.para[-1]['S'  ] = self.S2 [nc,:self.ndecays[nc]]
+            self.para[-1]['tau'] = self.tau[nc,:self.ndecays[nc]]
             self.para[-1]['p'  ] = np.concatenate((self.para[-1]['S'], self.para[-1]['tau']))
 
 
