@@ -464,7 +464,7 @@ class OrderParameter(object):
 
             for nfit in range(nfits):
                 print(len(progress_msg)*'\b', end="")
-                progress_percent = 100.0*(nc*nfit)/(nfits*ncorr)
+                progress_percent = 100.0*(nc*nfit+nfit)/(nfits*ncorr)
                 runtime          = time.time() - starttime
                 if progress_percent > 0:
                     ETA          = runtime * (100-progress_percent) / progress_percent
