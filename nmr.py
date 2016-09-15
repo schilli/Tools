@@ -452,11 +452,24 @@ class OrderParameter(object):
         self.para = []
         totaldecays = 1 # maximum number of decays with successful fit
 
+        progress_fmt = "Progress: {:6.2f}% (ETA: {:6.0f} sec.)"
+        progress_msg = progress_fmt.format(0.0, 0.0)
+        print(progress_msg, end="")
+        sys.stdout.flush()
+
+        starttime = time.time()
         for nc in range(ncorr):
-            print("nc: {:4d}/{:4d}:".format(nc,ncorr), end=""); sys.stdout.flush()
+#            print("nc: {:4d}/{:4d}:".format(nc,ncorr), end=""); sys.stdout.flush()
 
             for nfit in range(nfits):
-                print("", nfit, end=""); sys.stdout.flush()
+                print(len(progress_msg)*'\b', end="")
+                progress_percent = 100.0*(nc*nfit)/(nfits*ncorr)
+                runtime          = time.time() - starttime
+                ETA              = runtime * (100-progress_percent) / progress_percent
+                progress_msg     = progress_fmt.format(progress_percent, ETA)
+                print(progress_msg, end="")
+                sys.stdout.flush()
+#                print("", nfit, end=""); sys.stdout.flush()
                 
 
                 # compute new average correlation function
@@ -480,7 +493,7 @@ class OrderParameter(object):
                     tau    [nc, nfit, decay_ndx,   :ndecays] = p['tau']
                     success[nc, nfit, decay_ndx]             = p['success']
 
-            print("")
+#            print("")
 
         # reset random number generator state
         np.random.set_state(randomstate)
@@ -501,11 +514,7 @@ class OrderParameter(object):
         self.S2std   = np.array([S2 [nc,goodfits[nc,:],bestmodel[nc],:].std (0) for nc in range(ncorr)])
         self.tau     = np.array([tau[nc,goodfits[nc,:],bestmodel[nc],:].mean(0) for nc in range(ncorr)])
         self.taustd  = np.array([tau[nc,goodfits[nc,:],bestmodel[nc],:].std (0) for nc in range(ncorr)]) 
-#        self.S2      = S2 [:,:,bestmodel].mean(1)
-#        self.S2std   = S2 [:,:,bestmodel].std(1)
-#        self.tau     = tau[:,:,bestmodel].mean(1)
-#        self.taustd  = tau[:,:,bestmodel].std(1)
-        self.ndecays = bestmodel
+        self.ndecays = bestmodel + 1
         self.prob    = bestprob
 
         # store list of one original fitting result for each residue
@@ -513,8 +522,6 @@ class OrderParameter(object):
         for nc in range(ncorr):
             clearestfit = probability[nc,:,bestmodel[nc]].argmax()
             self.para.append(paralist[nc][clearestfit][bestmodel[nc]])
-
-
 
 
 #        self.S2   = np.zeros([ncorr, totaldecays])
