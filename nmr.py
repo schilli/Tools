@@ -475,7 +475,7 @@ class OrderParameter(object):
         for nc in range(ncorr):
 
             for nfit in range(nfits):
-                print(len(progress_msg)*'\b', end="")
+                print(len(progress_msg)*'\b' + len(progress_msg)*' ' + len(progress_msg)*'\b', end="")
                 progress_percent = 100.0*(nc*nfits+nfit)/(nfits*ncorr)
                 runtime          = time.time() - starttime
                 if progress_percent > 0:
@@ -506,7 +506,8 @@ class OrderParameter(object):
                     self._tau    [nc, nfit, decay_ndx,   :ndecays] = p['tau']
                     self._success[nc, nfit, decay_ndx]             = p['success']
 
-        progress_msg = make_progress_msg(0.0, 0.0)
+        print(len(progress_msg)*'\b' + len(progress_msg)*' ' + len(progress_msg)*'\b', end="")
+        progress_msg = make_progress_msg(100.0, 0.0)
         print(progress_msg)
 
         # reset random number generator state
