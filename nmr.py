@@ -443,6 +443,7 @@ class OrderParameter(object):
             firstf = 1
 
         self._AIC      = np.zeros([ncorr, nfits, maxdecays])
+        self._lsq      = np.zeros([ncorr, nfits, maxdecays])
         self._para     = np.zeros([ncorr, nfits, maxdecays, 2*maxdecays])
         self._S2       = np.zeros([ncorr, nfits, maxdecays,   maxdecays])
         self._tau      = np.zeros([ncorr, nfits, maxdecays,   maxdecays])
@@ -499,6 +500,7 @@ class OrderParameter(object):
                     p = self.ls.fit(ndecays, fast=fast, internal=internal, **kwargs)
                     self._paralist[nc][nfit].append(p)
                     self._AIC    [nc, nfit, decay_ndx]             = p['AIC']
+                    self._lsq    [nc, nfit, decay_ndx]             = p['lsq']
                     self._para   [nc, nfit, decay_ndx, :2*ndecays] = p['p']
                     self._S2     [nc, nfit, decay_ndx,   :ndecays] = p['S']
                     self._tau    [nc, nfit, decay_ndx,   :ndecays] = p['tau']
