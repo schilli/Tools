@@ -452,8 +452,9 @@ class OrderParameter(object):
         self.para = []
         totaldecays = 1 # maximum number of decays with successful fit
 
+        ETA = 0.0
         progress_fmt = "Progress: {:6.2f}% (ETA: {:6.0f} sec.)"
-        progress_msg = progress_fmt.format(0.0, 0.0)
+        progress_msg = progress_fmt.format(0.0, ETA)
         print(progress_msg, end="")
         sys.stdout.flush()
 
@@ -465,7 +466,8 @@ class OrderParameter(object):
                 print(len(progress_msg)*'\b', end="")
                 progress_percent = 100.0*(nc*nfit)/(nfits*ncorr)
                 runtime          = time.time() - starttime
-                ETA              = runtime * (100-progress_percent) / progress_percent
+                if progress_percent > 0:
+                    ETA          = runtime * (100-progress_percent) / progress_percent
                 progress_msg     = progress_fmt.format(progress_percent, ETA)
                 print(progress_msg, end="")
                 sys.stdout.flush()
