@@ -99,7 +99,7 @@ class LS(object):
         result["iterations"] = res.nit
         result["status"]     = res.status
         result["message"]    = res.message
-        result["AIC"]        = AIC(RSS=result['lsq'], n=self.C.shape[0], k=result["p"].shape[0]+1) # k=len(p) + 1,
+        result["AIC"]        = AIC(RSS=result['lsq'], n=self.C.shape[0], k=result["p"].shape[0]  ) # k=len(p) + 1,
                                                                                                    # because noise has a parameter has well 
                                                                                                    # (https://en.wikipedia.org/wiki/Akaike_information_criterion)
         if self.internal:
