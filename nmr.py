@@ -534,7 +534,12 @@ class OrderParameter(object):
 
         # store list of one original fitting result for each residue
         self.para = []
-#        for nc in range(ncorr):
+        for nc in range(ncorr):
+            p = {}
+            p['S']   = np.array([1, 0.9, 0.8])
+            p['tau'] = np.array([3000, 1000, 50])
+            p['p']   = np.array([1, 0.9, 0.8, 3000, 1000, 50])
+            self.para.append(p)
 #            clearestfit = self._probability[nc,:,self._bestmodel[nc]].argmax()
 #            self.para.append(self._paralist[nc][clearestfit][self._bestmodel[nc]])
 #            self.para[-1]['S'  ] = self.S2 [nc,:self.ndecays[nc]]
