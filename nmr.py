@@ -506,6 +506,8 @@ class OrderParameter(object):
                     self._tau    [nc, nfit, decay_ndx,   :ndecays] = p['tau']
                     self._success[nc, nfit, decay_ndx]             = p['success']
 
+        progress_msg = make_progress_msg(0.0, 0.0)
+        print(progress_msg)
 
         # reset random number generator state
         np.random.set_state(randomstate)
