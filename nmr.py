@@ -435,7 +435,7 @@ class OrderParameter(object):
 
         dt      = self.avgcorr.dt
         ncorr   = self.avgcorr.corr.shape[0]
-        ncorr   = 2
+#        ncorr   = 2
         nframes = self.avgcorr.corr.shape[1]
         t       = np.linspace(0, dt*nframes, nframes)
         firstf  = 0
