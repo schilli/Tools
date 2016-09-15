@@ -422,7 +422,7 @@ class OrderParameter(object):
 
 # ==================================== #
 
-    def estimate_generalLS_modelSelection(self, fast=True, internal=False, weighted=False, maxdecays=int(1e3), nfits=1, **kwargs):
+    def estimate_generalLS_modelSelection(self, fast=True, internal=False, weighted=False, maxdecays=int(1e3), nfits=1, ncorr=None, **kwargs):
         """
         nfits
         The number of fits to perform per amino acid.
@@ -434,7 +434,8 @@ class OrderParameter(object):
         np.random.seed(23)
 
         dt      = self.avgcorr.dt
-        ncorr   = self.avgcorr.corr.shape[0]
+        if ncorr is None:
+            ncorr   = self.avgcorr.corr.shape[0]
 #        ncorr   = 10
         nframes = self.avgcorr.corr.shape[1]
         t       = np.linspace(0, dt*nframes, nframes)
@@ -466,49 +467,49 @@ class OrderParameter(object):
             return progress_msg + ETA_msg
 
 
-        ETA = 0.0
-        progress_msg = make_progress_msg(0.0, ETA)
-        print(progress_msg, end="")
-        sys.stdout.flush()
-
-        starttime = time.time()
-        for nc in range(ncorr):
-
-            for nfit in range(nfits):
-                print(len(progress_msg)*'\b' + len(progress_msg)*' ' + len(progress_msg)*'\b', end="")
-                progress_percent = 100.0*(nc*nfits+nfit)/(nfits*ncorr)
-                runtime          = time.time() - starttime
-                if progress_percent > 0:
-                    ETA          = runtime * (100-progress_percent) / progress_percent
-                progress_msg = make_progress_msg(progress_percent, ETA)
-                print(progress_msg, end="")
-                sys.stdout.flush()
-
-                # compute new average correlation function
-                np.random.shuffle(self.corrlist)
-                self.average_corr()
-
-                # set up Lipari Szabo fitter
-                if weighted:
-                    self.ls = LS.LS(t[firstf:], self.avgcorr.corr[nc,firstf:], sigma=self.avgcorr.std[nc,firstf:])
-                else:
-                    self.ls = LS.LS(t[firstf:], self.avgcorr.corr[nc,firstf:]) 
-
-                # fit for all correlation functions, correlation function shuffles and number of decays
-                for ndecays in range(1,maxdecays+1):
-                    decay_ndx = ndecays - 1
-                    p = self.ls.fit(ndecays, fast=fast, internal=internal, **kwargs)
-                    self._paralist[nc][nfit].append(p)
-                    self._AIC    [nc, nfit, decay_ndx]             = p['AIC']
-                    self._lsq    [nc, nfit, decay_ndx]             = p['lsq']
-                    self._para   [nc, nfit, decay_ndx, :2*ndecays] = p['p']
-                    self._S2     [nc, nfit, decay_ndx,   :ndecays] = p['S']
-                    self._tau    [nc, nfit, decay_ndx,   :ndecays] = p['tau']
-                    self._success[nc, nfit, decay_ndx]             = p['success']
-
-        print(len(progress_msg)*'\b' + len(progress_msg)*' ' + len(progress_msg)*'\b', end="")
-        progress_msg = make_progress_msg(100.0, 0.0)
-        print(progress_msg)
+#        ETA = 0.0
+#        progress_msg = make_progress_msg(0.0, ETA)
+#        print(progress_msg, end="")
+#        sys.stdout.flush()
+#
+#        starttime = time.time()
+#        for nc in range(ncorr):
+#
+#            for nfit in range(nfits):
+#                print(len(progress_msg)*'\b' + len(progress_msg)*' ' + len(progress_msg)*'\b', end="")
+#                progress_percent = 100.0*(nc*nfits+nfit)/(nfits*ncorr)
+#                runtime          = time.time() - starttime
+#                if progress_percent > 0:
+#                    ETA          = runtime * (100-progress_percent) / progress_percent
+#                progress_msg = make_progress_msg(progress_percent, ETA)
+#                print(progress_msg, end="")
+#                sys.stdout.flush()
+#
+#                # compute new average correlation function
+#                np.random.shuffle(self.corrlist)
+#                self.average_corr()
+#
+#                # set up Lipari Szabo fitter
+#                if weighted:
+#                    self.ls = LS.LS(t[firstf:], self.avgcorr.corr[nc,firstf:], sigma=self.avgcorr.std[nc,firstf:])
+#                else:
+#                    self.ls = LS.LS(t[firstf:], self.avgcorr.corr[nc,firstf:]) 
+#
+#                # fit for all correlation functions, correlation function shuffles and number of decays
+#                for ndecays in range(1,maxdecays+1):
+#                    decay_ndx = ndecays - 1
+#                    p = self.ls.fit(ndecays, fast=fast, internal=internal, **kwargs)
+#                    self._paralist[nc][nfit].append(p)
+#                    self._AIC    [nc, nfit, decay_ndx]             = p['AIC']
+#                    self._lsq    [nc, nfit, decay_ndx]             = p['lsq']
+#                    self._para   [nc, nfit, decay_ndx, :2*ndecays] = p['p']
+#                    self._S2     [nc, nfit, decay_ndx,   :ndecays] = p['S']
+#                    self._tau    [nc, nfit, decay_ndx,   :ndecays] = p['tau']
+#                    self._success[nc, nfit, decay_ndx]             = p['success']
+#
+#        print(len(progress_msg)*'\b' + len(progress_msg)*' ' + len(progress_msg)*'\b', end="")
+#        progress_msg = make_progress_msg(100.0, 0.0)
+#        print(progress_msg)
 
         # reset random number generator state
         np.random.set_state(randomstate)
@@ -533,12 +534,12 @@ class OrderParameter(object):
 
         # store list of one original fitting result for each residue
         self.para = []
-        for nc in range(ncorr):
-            clearestfit = self._probability[nc,:,self._bestmodel[nc]].argmax()
-            self.para.append(self._paralist[nc][clearestfit][self._bestmodel[nc]])
-            self.para[-1]['S'  ] = self.S2 [nc,:self.ndecays[nc]]
-            self.para[-1]['tau'] = self.tau[nc,:self.ndecays[nc]]
-            self.para[-1]['p'  ] = np.concatenate((self.para[-1]['S'], self.para[-1]['tau']))
+#        for nc in range(ncorr):
+#            clearestfit = self._probability[nc,:,self._bestmodel[nc]].argmax()
+#            self.para.append(self._paralist[nc][clearestfit][self._bestmodel[nc]])
+#            self.para[-1]['S'  ] = self.S2 [nc,:self.ndecays[nc]]
+#            self.para[-1]['tau'] = self.tau[nc,:self.ndecays[nc]]
+#            self.para[-1]['p'  ] = np.concatenate((self.para[-1]['S'], self.para[-1]['tau']))
 
 
 # ==================================== #
