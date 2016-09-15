@@ -453,7 +453,7 @@ class OrderParameter(object):
         totaldecays = 1 # maximum number of decays with successful fit
 
         ETA = 0.0
-        progress_fmt = "Progress: {:6.2f}% (ETA: {:6.0f} sec.)"
+        progress_fmt = "Progress: {:3.0f}% (ETA: {:6.0f} sec.)"
         progress_msg = progress_fmt.format(0.0, ETA)
         print(progress_msg, end="")
         sys.stdout.flush()
