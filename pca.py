@@ -36,7 +36,7 @@ def test(n=100):
 
 
 
-def pca(data, project=False, verbose=False):
+def pca(data, project=False, return_cov=False, verbose=False):
     """Compute the principal components of the given data based on eigenvalue decomposition
     Input:
         data: First index (rows) are variables,
@@ -93,14 +93,20 @@ def pca(data, project=False, verbose=False):
                 projectedData[eig_idx, point_idx] = np.dot(eigvecs[:,eig_idx], data[:,point_idx]) 
         if verbose:
             print(" {:.2f} sec.".format(time.time() - starttime))   
-        return eigvals, sortedeigvecs, projectedData
+        if return_cov:
+            return eigvals, sortedeigvecs, projectedData, covariance
+        else:
+            return eigvals, sortedeigvecs, projectedData
 
     else:
-        return eigvals, sortedeigvecs
+        if return_cov:
+            return eigvals, sortedeigvecs, covariance
+        else:
+            return eigvals, sortedeigvecs
 
 
 
-def dpca(dihedrals, unit='degree', verbose=False):
+def dpca(dihedrals, unit='degree', return_cov=False, verbose=False):
     """Perform a dihedral pca
     Input:
         Dihedral angle data: rows (first index) are the angles and
@@ -127,7 +133,10 @@ def dpca(dihedrals, unit='degree', verbose=False):
     cartcoords[sin_idx,:] = sines
 
     # Compute pca
-    eigvals, eigvecs = pca(cartcoords, verbose=verbose)
+    if return_cov:
+        eigvals, eigvecs, covariance = pca(cartcoords, return_cov=return_cov, verbose=verbose)
+    else:
+        eigvals, eigvecs = pca(cartcoords, return_cov=return_cov, verbose=verbose)
 
 #    # Project data on principal components
 #    if verbose:
@@ -158,7 +167,10 @@ def dpca(dihedrals, unit='degree', verbose=False):
         print(len(msg)*"\b", end="")
         print(" {:.2f} sec.".format(time.time() - starttime))    
 
-    return eigvals, eigvecs, projectedcoords
+    if return_cov:
+        return eigvals, eigvecs, projectedcoords, covariance
+    else:
+        return eigvals, eigvecs, projectedcoords
     
 
 
